@@ -1,0 +1,96 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-08-02T03:12:33Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+    { "type": "node", "id": 2131321810, "lat": 38.8856378, "lon": -77.1757025 },
+    { "type": "node", "id": 2131321811, "lat": 38.8856573, "lon": -77.1758846 },
+    { "type": "node", "id": 2131321813, "lat": 38.8857147, "lon": -77.1758254 },
+    { "type": "node", "id": 2172647003, "lat": 38.879227, "lon": -77.1729135 },
+    { "type": "node", "id": 2172647007, "lat": 38.8792678, "lon": -77.1730079 },
+    { "type": "node", "id": 2172647009, "lat": 38.879276, "lon": -77.1728785 },
+    { "type": "node", "id": 2172647011, "lat": 38.8793168, "lon": -77.1729729 },
+    { "type": "node", "id": 2193474073, "lat": 38.8854655, "lon": -77.1758448 },
+    { "type": "node", "id": 2193474074, "lat": 38.8855429, "lon": -77.1759633 },
+    { "type": "node", "id": 2193474075, "lat": 38.8855462, "lon": -77.1757644 },
+    { "type": "node", "id": 2193474076, "lat": 38.8855577, "lon": -77.1757898 },
+    { "type": "node", "id": 2193474077, "lat": 38.8856401, "lon": -77.1758596 },
+    {
+      "type": "node",
+      "id": 12115675230,
+      "lat": 38.8789237,
+      "lon": -77.1805677,
+      "tags": {
+        "addr:city": "Falls Church",
+        "addr:housenumber": "7179",
+        "addr:postcode": "22046",
+        "addr:state": "VA",
+        "addr:street": "Lee hwy",
+        "amenity": "fuel",
+        "name": "Noble Gas Inc",
+        "payment:cash": "yes",
+        "payment:credit_cards": "yes",
+        "payment:debit_cards": "yes"
+      }
+    },
+    {
+      "type": "way",
+      "id": 203156123,
+      "nodes": [
+        2131321811, 2131321813, 2131321810, 2193474076, 2193474075, 2193474073,
+        2193474074, 2193474077, 2131321811
+      ],
+      "tags": {
+        "addr:city": "Falls Church",
+        "addr:housenumber": "400",
+        "addr:postcode": "22046",
+        "addr:state": "VA",
+        "addr:street": "West Broad Street",
+        "amenity": "fuel",
+        "atm": "yes",
+        "brand": "Exxon",
+        "brand:wikidata": "Q109675651",
+        "building": "yes",
+        "building:levels": "1",
+        "car_wash": "yes",
+        "compressed_air": "yes",
+        "fuel:e10": "yes",
+        "fuel:propane": "yes",
+        "name": "Exxon",
+        "opening_hours": "24/7",
+        "payment:apple_pay": "yes",
+        "payment:google_pay": "yes",
+        "phone": "+1 703-532-0399",
+        "ref": "200312381",
+        "self_service": "yes",
+        "toilets": "yes",
+        "website": "https://www.exxon.com/en/find-station/exxon-fallschurch-va-broadexxon-200312381"
+      }
+    },
+    {
+      "type": "way",
+      "id": 207123259,
+      "nodes": [2172647011, 2172647009, 2172647003, 2172647007, 2172647011],
+      "tags": {
+        "addr:city": "Falls Church",
+        "addr:housenumber": "100",
+        "addr:postcode": "22046",
+        "addr:state": "VA",
+        "addr:street": "Hillwood Avenue",
+        "amenity": "fuel",
+        "building": "roof",
+        "building:levels": "1",
+        "layer": "1",
+        "mapillary": "3013894432159072",
+        "name": "Hillwood Mart",
+        "opening_hours": "Su-Sa 06:00-22:00",
+        "phone": "+1 703 532 0513",
+        "self_service": "yes",
+        "website": "https://hillwood-mart.com-place.com/"
+      }
+    }
+  ]
+}

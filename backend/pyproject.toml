@@ -1,0 +1,70 @@
+[project]
+name = "shadowbot"
+version = "0.1.0"
+description = "Offline-first geolocation triage, routing, and tracking service"
+authors = [
+    { name = "boltonn", email = "nazgul44@protonmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.18.5",
+    "asyncpg>=0.31.0",
+    "fastapi>=0.141.1",
+    "geoalchemy2>=0.20.0",
+    "geojson-pydantic>=2.1.1",
+    "httpx>=0.28.1",
+    "loguru>=0.7.3",
+    "networkx>=3.6.1",
+    "osmnx>=2.1.1",
+    "pydantic>=2.13.4",
+    "pydantic-ai>=2.22.0",
+    "pydantic-settings>=2.14.2",
+    "python-multipart>=0.0.32",
+    "scikit-learn>=1.9.0",
+    "shapely>=2.1.2",
+    "sqlalchemy[asyncio]>=2.0.51",
+    "sse-starlette>=3.4.6",
+    "uvicorn[standard]>=0.52.1",
+]
+
+[project.scripts]
+shadowbot-serve = "shadowbot.main:main"
+
+[build-system]
+requires = ["uv_build>=0.11.3,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "D"]
+
+ignore = [
+  "E501",
+  "D100",
+  "D101",
+  "D104",
+  "D107",
+  "D203",
+  "D213",
+  "D401",
+]
+
+fixable = ["ALL"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-single-line = false
+known-first-party = ["shadowbot"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.isort]
+py_version=312

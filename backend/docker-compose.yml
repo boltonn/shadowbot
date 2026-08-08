@@ -1,0 +1,44 @@
+name: shadowbot
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: shadowbot
+      POSTGRES_USER: shadowbot
+      POSTGRES_PASSWORD: shadowbot
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Self-hosted Overpass API — routing/POI queries hit this instead of the public
+  # instance, which is frequently overloaded (504s, refused connections) under load.
+  # /db already holds a fully-imported Virginia extract (Geofabrik PBF); on first run
+  # against an empty directory it auto-initializes instead of serving. To reimport
+  # (different region, updated data): stop this service, empty the /db host dir, then
+  # `docker compose up overpass` — it detects the empty dir and runs OVERPASS_MODE=init
+  # again using the same PBF/env vars below.
+  overpass:
+    image: wiktorn/overpass-api
+    environment:
+      OVERPASS_MODE: init
+      OVERPASS_PLANET_URL: file:///db/planet.osm.pbf
+      OVERPASS_PLANET_PREPROCESS: >-
+        mv /db/planet.osm.bz2 /db/planet.osm.pbf 2>/dev/null;
+        osmium cat -o /db/planet.osm.bz2 /db/planet.osm.pbf && rm -f /db/planet.osm.pbf
+      OVERPASS_DIFF_URL: https://download.geofabrik.de/north-america/us/virginia-updates/
+      OVERPASS_RULES_LOAD: "10"
+      # Without this, the dispatcher launches with no --rate-limit flag at all, which
+      # defaults to 0 concurrent slots — every query then waits forever for a slot
+      # that can never open, rather than being unlimited. This is a private
+      # single-consumer instance, so allow plenty of concurrency.
+      OVERPASS_RATE_LIMIT: "100"
+    ports:
+      - "12345:80"
+    volumes:
+      - /home/boltonn/data/openstreetmap/overpass_db:/db
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
