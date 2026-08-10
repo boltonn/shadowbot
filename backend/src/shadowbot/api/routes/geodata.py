@@ -1,29 +1,83 @@
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile
-from geojson_pydantic import Point
+from fastapi import APIRouter, Form, HTTPException, Response, UploadFile
+from geojson_pydantic import Point, Polygon
 
-from shadowbot.api.deps.postgres import PointDatasetDatastoreDep, TrackDatastoreDep
+from shadowbot.api.deps.postgres import (
+    DatasetDatastoreDep,
+    PointDatasetDatastoreDep,
+    PolygonDatasetDatastoreDep,
+    TrackDatastoreDep,
+)
+from shadowbot.api.deps.routing import RoutingDatastoreDep
+from shadowbot.schemas.common import DatasetGeometryKind
+from shadowbot.schemas.dataset import (
+    BulkTagRequest,
+    DatasetDetail,
+    DatasetsRequest,
+    LabelFeatureRequest,
+    LabelTrackPointRequest,
+    PaginatedDatasetsResponse,
+)
 from shadowbot.schemas.point_dataset import (
-    PaginatedPointDatasetsResponse,
     PointDataset,
     PointDatasetCreate,
-    PointDatasetDetail,
-    PointDatasetsRequest,
+    PointFeature,
     PointFeatureCreate,
 )
+from shadowbot.schemas.polygon_dataset import (
+    PolygonDataset,
+    PolygonDatasetCreate,
+    PolygonFeature,
+    PolygonFeatureCreate,
+)
 from shadowbot.schemas.track import (
-    PaginatedTracksResponse,
+    MapMatchResult,
     Track,
     TrackCreate,
-    TrackDetail,
+    TrackPoint,
     TrackPointCreate,
     TrackSource,
-    TracksRequest,
 )
 
 router = APIRouter(prefix="/geodata", tags=["geodata"])
+
+
+@router.get("/datasets")
+async def list_datasets(
+    dataset_repository: DatasetDatastoreDep,
+    page: int = 1,
+    limit: int = 20,
+    geometry_kind: DatasetGeometryKind | None = None,
+) -> PaginatedDatasetsResponse:
+    """List dataset summaries across all geometry kinds (points, tracks, polygons)."""
+    return await dataset_repository.list_datasets(
+        DatasetsRequest(page=page, limit=limit, geometry_kind=geometry_kind)
+    )
+
+
+@router.get("/datasets/{dataset_id}")
+async def get_dataset(dataset_id: str, dataset_repository: DatasetDatastoreDep) -> DatasetDetail:
+    """Retrieve a dataset including all of its features, whatever its geometry kind."""
+    dataset = await dataset_repository.get_dataset_detail(dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail=f"Dataset not found: {dataset_id}")
+    return dataset
+
+
+@router.get("/datasets/{dataset_id}/download")
+async def download_dataset(dataset_id: str, dataset_repository: DatasetDatastoreDep) -> Response:
+    """Download a dataset's features as a GeoJSON FeatureCollection."""
+    dataset = await dataset_repository.get_dataset_detail(dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail=f"Dataset not found: {dataset_id}")
+    geojson = await dataset_repository.download_dataset(dataset_id)
+    return Response(
+        content=json.dumps(geojson),
+        media_type="application/geo+json",
+        headers={"Content-Disposition": f'attachment; filename="{dataset.name}.geojson"'},
+    )
 
 
 def _parse_geojson_points(raw: dict) -> list[TrackPointCreate]:
@@ -50,7 +104,7 @@ def _parse_geojson_points(raw: dict) -> list[TrackPointCreate]:
     return points
 
 
-@router.post("/upload")
+@router.post("/datasets/tracks/upload")
 async def upload_track(track_repository: TrackDatastoreDep, file: UploadFile, name: str = Form(...)) -> Track:
     """Upload a GeoJSON FeatureCollection of timestamped Point features as a new track."""
     try:
@@ -62,21 +116,39 @@ async def upload_track(track_repository: TrackDatastoreDep, file: UploadFile, na
     return await track_repository.add_track(TrackCreate(name=name, source=TrackSource.GEOJSON, points=points))
 
 
-@router.get("/tracks")
-async def list_tracks(
-    track_repository: TrackDatastoreDep, page: int = 1, limit: int = 20
-) -> PaginatedTracksResponse:
-    """List uploaded tracks."""
-    return await track_repository.get_tracks(TracksRequest(page=page, limit=limit))
+@router.post("/datasets/tracks/{track_id}/match")
+async def match_track(
+    track_id: str, track_repository: TrackDatastoreDep, routing: RoutingDatastoreDep
+) -> MapMatchResult:
+    """Snap a track's raw GPS points onto the actual roads it drove.
 
-
-@router.get("/tracks/{track_id}")
-async def get_track(track_id: str, track_repository: TrackDatastoreDep) -> TrackDetail:
-    """Retrieve a track including all of its points."""
+    Requires the Valhalla routing backend (VALHALLA__TILE_URI) — 501s otherwise.
+    """
     track = await track_repository.get_track_by_id(track_id)
     if track is None:
         raise HTTPException(status_code=404, detail=f"Track not found: {track_id}")
-    return track
+    if not routing.supports_map_matching:
+        raise HTTPException(status_code=501, detail="Map matching requires the Valhalla routing backend")
+    try:
+        return await routing.match_track(track=track)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch("/datasets/tracks/{dataset_id}/features/{feature_id}")
+async def label_track_point(
+    dataset_id: str, feature_id: str, request: LabelTrackPointRequest, track_repository: TrackDatastoreDep
+) -> TrackPoint:
+    """Update a track point's tags."""
+    return await track_repository.label_feature(dataset_id, feature_id, request)
+
+
+@router.post("/datasets/tracks/{dataset_id}/features/tags")
+async def bulk_tag_track_points(
+    dataset_id: str, request: BulkTagRequest, track_repository: TrackDatastoreDep
+) -> list[TrackPoint]:
+    """Apply and/or remove tags across a set of a track's points."""
+    return await track_repository.bulk_tag_features(dataset_id, request)
 
 
 def _parse_geojson_point_features(
@@ -112,7 +184,7 @@ def _parse_geojson_point_features(
     return points
 
 
-@router.post("/points/upload")
+@router.post("/datasets/points/upload")
 async def upload_point_dataset(
     point_dataset_repository: PointDatasetDatastoreDep,
     file: UploadFile,
@@ -134,18 +206,89 @@ async def upload_point_dataset(
     return await point_dataset_repository.add_point_dataset(PointDatasetCreate(name=name, points=points))
 
 
-@router.get("/points")
-async def list_point_datasets(
-    point_dataset_repository: PointDatasetDatastoreDep, page: int = 1, limit: int = 20
-) -> PaginatedPointDatasetsResponse:
-    """List uploaded point datasets."""
-    return await point_dataset_repository.get_point_datasets(PointDatasetsRequest(page=page, limit=limit))
+@router.patch("/datasets/points/{dataset_id}/features/{feature_id}")
+async def label_point_feature(
+    dataset_id: str,
+    feature_id: str,
+    request: LabelFeatureRequest,
+    point_dataset_repository: PointDatasetDatastoreDep,
+) -> PointFeature:
+    """Update a point feature's category, name, and tags."""
+    return await point_dataset_repository.label_feature(dataset_id, feature_id, request)
 
 
-@router.get("/points/{dataset_id}")
-async def get_point_dataset(dataset_id: str, point_dataset_repository: PointDatasetDatastoreDep) -> PointDatasetDetail:
-    """Retrieve a point dataset including all of its features."""
-    dataset = await point_dataset_repository.get_point_dataset_by_id(dataset_id)
-    if dataset is None:
-        raise HTTPException(status_code=404, detail=f"Point dataset not found: {dataset_id}")
-    return dataset
+@router.post("/datasets/points/{dataset_id}/features/tags")
+async def bulk_tag_point_features(
+    dataset_id: str, request: BulkTagRequest, point_dataset_repository: PointDatasetDatastoreDep
+) -> list[PointFeature]:
+    """Apply and/or remove tags across a set of a point dataset's features."""
+    return await point_dataset_repository.bulk_tag_features(dataset_id, request)
+
+
+def _parse_geojson_polygon_features(
+    raw: dict, type_field: str | None, default_type: str | None
+) -> list[PolygonFeatureCreate]:
+    """Extract categorized Polygon features from an uploaded GeoJSON payload.
+
+    Same category-source convention as point uploads: a per-feature `type_field`
+    property, or a single `default_type` applied to every polygon.
+    """
+    if not type_field and not default_type:
+        raise ValueError("Provide either a type field name or a default type")
+
+    features = raw["features"] if raw.get("type") == "FeatureCollection" else [raw]
+
+    polygons = []
+    for index, feature in enumerate(features):
+        geometry = feature.get("geometry", feature)
+        if geometry.get("type") != "Polygon":
+            continue
+        properties = feature.get("properties") or {}
+        category = properties.get(type_field) if type_field else default_type
+        if not category:
+            raise ValueError(f"Polygon {index} is missing a '{type_field}' property")
+        polygons.append(
+            PolygonFeatureCreate(
+                geometry=Polygon(**geometry),
+                category=str(category),
+                name=properties.get("name") or properties.get("label"),
+            )
+        )
+    return polygons
+
+
+@router.post("/datasets/polygons/upload")
+async def upload_polygon_dataset(
+    polygon_dataset_repository: PolygonDatasetDatastoreDep,
+    file: UploadFile,
+    name: str = Form(...),
+    type_field: str | None = Form(default=None),
+    default_type: str | None = Form(default=None),
+) -> PolygonDataset:
+    """Upload a GeoJSON FeatureCollection of categorized Polygon features as a new polygon dataset."""
+    try:
+        raw = json.loads(await file.read())
+        polygons = _parse_geojson_polygon_features(raw, type_field=type_field, default_type=default_type)
+    except (json.JSONDecodeError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid GeoJSON upload: {exc}") from exc
+
+    return await polygon_dataset_repository.add_polygon_dataset(PolygonDatasetCreate(name=name, polygons=polygons))
+
+
+@router.patch("/datasets/polygons/{dataset_id}/features/{feature_id}")
+async def label_polygon_feature(
+    dataset_id: str,
+    feature_id: str,
+    request: LabelFeatureRequest,
+    polygon_dataset_repository: PolygonDatasetDatastoreDep,
+) -> PolygonFeature:
+    """Update a polygon feature's category, name, and tags."""
+    return await polygon_dataset_repository.label_feature(dataset_id, feature_id, request)
+
+
+@router.post("/datasets/polygons/{dataset_id}/features/tags")
+async def bulk_tag_polygon_features(
+    dataset_id: str, request: BulkTagRequest, polygon_dataset_repository: PolygonDatasetDatastoreDep
+) -> list[PolygonFeature]:
+    """Apply and/or remove tags across a set of a polygon dataset's features."""
+    return await polygon_dataset_repository.bulk_tag_features(dataset_id, request)

@@ -1,6 +1,7 @@
 import asyncio
 from functools import lru_cache
 
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from shadowbot.datastores.postgres.config import PostgresConfig
@@ -36,6 +37,13 @@ async def init_db(config: PostgresConfig) -> None:
     async with get_async_engine(config).begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
         await conn.run_sync(Base.metadata.create_all)
+    logger.success(
+        "Connected to Postgres database '{database}' at {host}:{port} as '{username}'",
+        database=config.database,
+        host=config.host,
+        port=config.port,
+        username=config.username,
+    )
 
 
 def create_tables(config: PostgresConfig) -> None:

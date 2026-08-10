@@ -7,7 +7,7 @@ export function useUploadTrack() {
   return useMutation({
     mutationFn: ({ name, file }: { name: string; file: File }) => uploadTrack(name, file),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tracks"] });
+      queryClient.invalidateQueries({ queryKey: ["datasets"] });
     },
   });
 }

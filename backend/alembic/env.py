@@ -23,9 +23,7 @@ target_metadata = Base.metadata
 
 def include_object(object, name, type_, reflected, compare_to):
     """Ignore tables PostGIS creates (spatial_ref_sys, tiger geocoder, topology, ...) that aren't ours."""
-    if type_ == "table" and reflected and compare_to is None:
-        return False
-    return True
+    return not (type_ == "table" and reflected and compare_to is None)
 
 
 _settings = Settings()
@@ -67,6 +65,7 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    """Run migrations in 'online' mode."""
     context.configure(connection=connection, target_metadata=target_metadata, include_object=include_object)
 
     with context.begin_transaction():
@@ -74,9 +73,10 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    """In this scenario we need to create an Engine
-    and associate a connection with the context.
+    """Get an async engine and run migrations in 'online' mode.
 
+    In this scenario we need to create an Engine
+    and associate a connection with the context.
     """
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),

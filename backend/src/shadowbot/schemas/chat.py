@@ -1,28 +1,8 @@
 from datetime import datetime
-from enum import StrEnum
-from typing import Any
 
 from pydantic import Field
 
 from shadowbot.schemas.base import CamelModel
-
-
-class ChatRole(StrEnum):
-    """Speaker of a chat message."""
-
-    USER = "user"
-    ASSISTANT = "assistant"
-
-
-class ChatMessage(CamelModel):
-    """A single turn in a chat session."""
-
-    id: str
-    session_id: str
-    role: ChatRole
-    content: str
-    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
-    date_created: datetime
 
 
 class ChatSession(CamelModel):
@@ -39,4 +19,12 @@ class ChatRequest(CamelModel):
     session_id: str | None = Field(default=None)
     api_key: str | None = Field(
         default=None, description="Overrides the server-configured LLM API key for this request"
+    )
+
+
+class AgentConfig(CamelModel):
+    """Server-side agent configuration exposed to the frontend."""
+
+    has_server_key: bool = Field(
+        description="Whether the server can run the agent without a client-supplied API key"
     )

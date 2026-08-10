@@ -43,13 +43,15 @@ from shadowbot.agent.tools import AgentDeps
 from shadowbot.api.deps.poi import PoiDatastoreDep
 from shadowbot.api.deps.postgres import (
     ChatDatastoreDep,
+    PointDatasetDatastoreDep,
+    PolygonDatasetDatastoreDep,
     RouteDatastoreDep,
     TrackDatastoreDep,
 )
 from shadowbot.api.deps.routing import RoutingDatastoreDep
 from shadowbot.api.settings import Settings
 from shadowbot.integrations.nominatim import NominatimClient
-from shadowbot.schemas.chat import ChatRequest
+from shadowbot.schemas.chat import AgentConfig, ChatRequest
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 settings = Settings()
@@ -73,6 +75,26 @@ def get_agent(api_key: str | None) -> Agent[AgentDeps, str]:
     if not api_key:
         return get_default_agent()
     return build_agent(settings.llm.model_copy(update={"api_key": api_key}))
+
+
+def has_server_llm_key() -> bool:
+    """Whether the server can build its default agent without a client-supplied API key.
+
+    Building the underlying provider client raises immediately if it has no key to
+    authenticate with (from settings or the provider's own env var), so attempting the
+    same lazy build used for real requests doubles as a config check with no network call.
+    """
+    try:
+        get_default_agent()
+        return True
+    except Exception:  # noqa: BLE001 — any build failure means no usable server key
+        return False
+
+
+@router.get("/config")
+def get_agent_config() -> AgentConfig:
+    """Whether the frontend can skip prompting for an API key up front."""
+    return AgentConfig(has_server_key=has_server_llm_key())
 
 
 @lru_cache(maxsize=1)
@@ -179,12 +201,20 @@ async def chat(
     routes: RouteDatastoreDep,
     tracks: TrackDatastoreDep,
     poi: PoiDatastoreDep,
+    point_datasets: PointDatasetDatastoreDep,
+    polygon_datasets: PolygonDatasetDatastoreDep,
 ) -> EventSourceResponse:
     """Stream an agent turn as an AI SDK UI Message Stream."""
     session = await chat_repository.get_or_create_session(request.session_id)
     message_history = await chat_repository.get_message_history(session.id)
     deps = AgentDeps(
-        geocoder=get_nominatim_client(), routing=routing, routes=routes, tracks=tracks, poi=poi
+        geocoder=get_nominatim_client(),
+        routing=routing,
+        routes=routes,
+        tracks=tracks,
+        poi=poi,
+        polygon_datasets=polygon_datasets,
+        point_datasets=point_datasets,
     )
 
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()

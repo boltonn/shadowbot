@@ -1,6 +1,6 @@
 "use client";
 
-import { usePointDatasets } from "@/features/geodata/hooks/use-point-datasets";
+import { useDatasets } from "@/features/geodata/hooks/use-datasets";
 import { colorForCategory, iconForCategory } from "@/features/geodata/lib/category-icons";
 import { useMapStore } from "@/features/map/store";
 
@@ -10,15 +10,15 @@ import { useMapStore } from "@/features/map/store";
  * rendering individual icons or clustered dots) back to a label.
  */
 export function PointDatasetLegend() {
-  const visiblePointDatasetIds = useMapStore((state) => state.visiblePointDatasetIds);
-  const { data } = usePointDatasets();
+  const visibleDatasetIds = useMapStore((state) => state.visibleDatasetIds);
+  const { data } = useDatasets({ geometryKind: "point" });
 
-  if (visiblePointDatasetIds.length === 0) return null;
+  if (visibleDatasetIds.length === 0) return null;
 
   const categories = Array.from(
     new Set(
       (data?.data ?? [])
-        .filter((dataset) => visiblePointDatasetIds.includes(dataset.id))
+        .filter((dataset) => visibleDatasetIds.includes(dataset.id))
         .flatMap((dataset) => dataset.categories),
     ),
   ).sort();

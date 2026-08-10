@@ -4,9 +4,10 @@ import { useMemo } from "react";
 import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { useTrackDetail } from "@/features/geodata/hooks/use-track-detail";
+import { useDatasetDetail } from "@/features/geodata/hooks/use-dataset-detail";
 import { filterTrackPoints } from "@/features/geodata/lib/track-filter";
 import { useMapStore } from "@/features/map/store";
+import type { TrackDetail } from "@/features/geodata/types";
 
 function formatTime(ms: number): string {
   return new Date(ms).toLocaleString(undefined, {
@@ -18,7 +19,8 @@ function formatTime(ms: number): string {
 }
 
 export function TrackTimeSlider({ trackId }: { trackId: string }) {
-  const { data: track } = useTrackDetail(trackId, true);
+  const { data } = useDatasetDetail(trackId, true);
+  const track = data && data.geometryKind === "track" ? (data as TrackDetail) : undefined;
   const window = useMapStore((state) => state.trackTimeWindows[trackId]);
   const selectedArea = useMapStore((state) => state.selectedArea);
   const setTrackTimeWindow = useMapStore((state) => state.setTrackTimeWindow);
@@ -35,7 +37,7 @@ export function TrackTimeSlider({ trackId }: { trackId: string }) {
 
   const filteredCount = useMemo(() => {
     if (!track) return 0;
-    return filterTrackPoints(track.points, window, selectedArea).length;
+    return filterTrackPoints(track.points, window, selectedArea?.geometry ?? null).length;
   }, [track, window, selectedArea]);
 
   if (!track || !domain || domain.start >= domain.end) return null;

@@ -12,8 +12,10 @@ import { Label } from "@/components/ui/label";
 import { RadarSweep } from "@/components/ui/radar-sweep";
 import { apiBaseUrl } from "@/lib/api-client";
 import { ApiKeyDialog } from "@/features/chat/components/api-key-dialog";
+import { useAgentConfig } from "@/features/chat/hooks/use-agent-config";
 import { useApiKey } from "@/features/chat/hooks/use-api-key";
 import { useSyncChatLocationsToMap } from "@/features/chat/hooks/use-sync-chat-locations";
+import { useSyncChatRouteToMap } from "@/features/chat/hooks/use-sync-chat-route";
 import {
   Conversation,
   ConversationContent,
@@ -36,6 +38,8 @@ export function ChatPanel() {
   const [showTrace, setShowTrace] = useState(true);
   const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false);
   const { apiKey, setApiKey } = useApiKey();
+  const { data: agentConfig } = useAgentConfig();
+  const hasPromptedForKeyRef = useRef(false);
 
   const transport = useMemo(
     () =>
@@ -60,6 +64,7 @@ export function ChatPanel() {
     transport,
   });
   useSyncChatLocationsToMap(messages);
+  useSyncChatRouteToMap(messages);
 
   const isBusy = status === "submitted" || status === "streaming";
   const lastMessage = messages[messages.length - 1];
@@ -82,6 +87,16 @@ export function ChatPanel() {
       setApiKeyDialogOpen(true);
     }
   }, [error]);
+
+  // Prompt for a key up front (once) rather than waiting for the first request to fail,
+  // if the server has no key of its own configured and the user hasn't supplied one.
+  useEffect(() => {
+    if (hasPromptedForKeyRef.current || !agentConfig || apiKey) return;
+    if (!agentConfig.hasServerKey) {
+      hasPromptedForKeyRef.current = true;
+      setApiKeyDialogOpen(true);
+    }
+  }, [agentConfig, apiKey]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

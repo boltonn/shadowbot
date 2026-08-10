@@ -3,7 +3,7 @@ from typing import Any
 from uuid import uuid4
 
 from geoalchemy2 import Geometry
-from sqlalchemy import DateTime, Float, ForeignKey, String
+from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shadowbot.datastores.postgres.tables.base import Base
@@ -39,5 +39,6 @@ class TrackPointTable(Base):
     )
     elevation_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     speed_mps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tags: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
 
     track: Mapped["TrackTable"] = relationship(back_populates="points")

@@ -3,7 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shadowbot.datastores.postgres.tables.route import RouteTable
 from shadowbot.datastores.postgres.utils import geom_to_linestring, geom_to_point, linestring_to_geom, point_to_geom
-from shadowbot.schemas.routing import AvoidancePreferences, Route
+from shadowbot.schemas.routing import Route
+
+# Columns stored natively (geometry types, or queried directly); everything else on Route
+# (waypoints, network_type, avoid, legs, alternates) round-trips through RouteTable.extra.
+_NATIVE_COLUMNS = {"id", "origin", "destination", "geometry", "distance_m", "duration_s", "date_created"}
 
 
 class PostgresRouteRepository:
@@ -21,7 +25,7 @@ class PostgresRouteRepository:
             geometry=linestring_to_geom(route.geometry),
             distance_m=route.distance_m,
             duration_s=route.duration_s,
-            avoid=route.avoid.model_dump(mode="json"),
+            extra=route.model_dump(mode="json", exclude=_NATIVE_COLUMNS),
             date_created=route.date_created,
         )
         self.session.add(route_table)
@@ -41,6 +45,6 @@ class PostgresRouteRepository:
             geometry=geom_to_linestring(route_table.geometry),
             distance_m=route_table.distance_m,
             duration_s=route_table.duration_s,
-            avoid=AvoidancePreferences.model_validate(route_table.avoid),
             date_created=route_table.date_created,
+            **route_table.extra,
         )

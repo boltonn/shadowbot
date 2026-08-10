@@ -27,6 +27,19 @@ dependencies = [
     "uvicorn[standard]>=0.52.1",
 ]
 
+# Optional Valhalla routing backend (in-process, over pre-built tiles — see
+# datastores/valhalla/). Not required: routing falls back to the pure-Python
+# networkx backend unless VALHALLA__TILE_URI is set. Install with:
+#   uv sync --extra valhalla
+[project.optional-dependencies]
+valhalla = [
+    "boto3>=1.43.67",
+    "osmium>=3.7.1",
+    "polyline>=2.0.4",
+    "pyvalhalla>=3.8.3",
+    "typer>=0.27.1",
+]
+
 [project.scripts]
 shadowbot-serve = "shadowbot.main:main"
 

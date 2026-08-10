@@ -8,7 +8,9 @@ from fastapi import Depends, FastAPI
 
 from shadowbot.api.settings import Settings
 from shadowbot.datastores.postgres.repositories.chat import PostgresChatRepository
+from shadowbot.datastores.postgres.repositories.dataset import PostgresDatasetRepository
 from shadowbot.datastores.postgres.repositories.point_dataset import PostgresPointDatasetRepository
+from shadowbot.datastores.postgres.repositories.polygon_dataset import PostgresPolygonDatasetRepository
 from shadowbot.datastores.postgres.repositories.route import PostgresRouteRepository
 from shadowbot.datastores.postgres.repositories.track import PostgresTrackRepository
 from shadowbot.datastores.postgres.session import get_session, init_db
@@ -47,7 +49,21 @@ async def get_point_dataset_repository() -> AsyncGenerator[PostgresPointDatasetR
         yield PostgresPointDatasetRepository(session=session)
 
 
+async def get_polygon_dataset_repository() -> AsyncGenerator[PostgresPolygonDatasetRepository, None]:
+    """Dependency injector for PostgresPolygonDatasetRepository."""
+    async with get_session(settings.postgres) as session:
+        yield PostgresPolygonDatasetRepository(session=session)
+
+
+async def get_dataset_repository() -> AsyncGenerator[PostgresDatasetRepository, None]:
+    """Dependency injector for PostgresDatasetRepository, the unified point/track/polygon facade."""
+    async with get_session(settings.postgres) as session:
+        yield PostgresDatasetRepository(session=session)
+
+
 TrackDatastoreDep = Annotated[PostgresTrackRepository, Depends(get_track_repository)]
 RouteDatastoreDep = Annotated[PostgresRouteRepository, Depends(get_route_repository)]
 ChatDatastoreDep = Annotated[PostgresChatRepository, Depends(get_chat_repository)]
 PointDatasetDatastoreDep = Annotated[PostgresPointDatasetRepository, Depends(get_point_dataset_repository)]
+PolygonDatasetDatastoreDep = Annotated[PostgresPolygonDatasetRepository, Depends(get_polygon_dataset_repository)]
+DatasetDatastoreDep = Annotated[PostgresDatasetRepository, Depends(get_dataset_repository)]

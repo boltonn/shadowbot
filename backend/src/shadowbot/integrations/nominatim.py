@@ -4,6 +4,7 @@ import re
 
 import httpx
 from geojson_pydantic import Point
+from geojson_pydantic.types import Position2D
 from pydantic import BaseModel, Field
 
 from shadowbot.schemas.routing import GeocodeRequest, GeocodeResult
@@ -78,7 +79,10 @@ class NominatimClient:
         return [
             GeocodeResult(
                 display_name=result["display_name"],
-                geometry=Point(type="Point", coordinates=(float(result["lon"]), float(result["lat"]))),
+                geometry=Point(
+                    type="Point",
+                    coordinates=Position2D(longitude=float(result["lon"]), latitude=float(result["lat"])),
+                ),
                 place_type=result.get("type"),
             )
             for result in results

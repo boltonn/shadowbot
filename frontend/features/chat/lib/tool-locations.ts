@@ -5,6 +5,7 @@ const LOCATION_TOOL_NAMES = new Set([
   "find_nearby_poi",
   "find_poi_along_route",
   "find_frequented_locations",
+  "find_point_dataset_along_route",
 ]);
 
 export function isLocationTool(toolName: string): boolean {
@@ -46,10 +47,12 @@ function toPoiLocation(item: unknown, id: string): ChatLocation | null {
   const coords = pointCoordinates(item.geometry);
   if (!coords) return null;
   const kind: ChatLocationKind = typeof item.category === "string" ? (item.category as ChatLocationKind) : "geocode";
+  // Raw OSM tags come through as "key=value" (e.g. "leisure=park") — use the value for the label.
+  const fallbackLabel = kind.includes("=") ? kind.split("=")[1] : kind;
   return {
     id,
     kind,
-    label: typeof item.name === "string" && item.name ? item.name : kind.replace(/_/g, " "),
+    label: typeof item.name === "string" && item.name ? item.name : fallbackLabel.replace(/_/g, " "),
     longitude: coords[0],
     latitude: coords[1],
   };
@@ -69,6 +72,15 @@ function toFrequentedLocation(item: unknown, id: string): ChatLocation | null {
   };
 }
 
+function toDatasetFeatureLocation(item: unknown, id: string): ChatLocation | null {
+  if (!isRecord(item)) return null;
+  const coords = pointCoordinates(item.geometry);
+  if (!coords) return null;
+  const category = typeof item.category === "string" ? item.category : "point";
+  const label = typeof item.name === "string" && item.name ? item.name : category.replace(/_/g, " ");
+  return { id, kind: "custom", label, longitude: coords[0], latitude: coords[1] };
+}
+
 /** Turns a finished location tool call's output into map-plottable locations. */
 export function extractChatLocations(toolName: string, toolCallId: string, output: unknown): ChatLocation[] {
   if (!Array.isArray(output)) return [];
@@ -78,6 +90,7 @@ export function extractChatLocations(toolName: string, toolCallId: string, outpu
     find_nearby_poi: toPoiLocation,
     find_poi_along_route: toPoiLocation,
     find_frequented_locations: toFrequentedLocation,
+    find_point_dataset_along_route: toDatasetFeatureLocation,
   }[toolName];
   if (!toLocation) return [];
 

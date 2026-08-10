@@ -2,14 +2,16 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { MapMarker, MarkerContent, MarkerTooltip, MapRoute, useMap } from "@/components/ui/map";
-import { useTrackDetail } from "@/features/geodata/hooks/use-track-detail";
+import { useDatasetDetail } from "@/features/geodata/hooks/use-dataset-detail";
 import { fitToCoordinates } from "@/features/map/lib/fit-bounds";
 import { filterTrackPoints } from "@/features/geodata/lib/track-filter";
 import { useMapStore } from "@/features/map/store";
+import type { TrackDetail } from "@/features/geodata/types";
 
 export function TrackLayer({ trackId }: { trackId: string }) {
   const { map } = useMap();
-  const { data: track } = useTrackDetail(trackId, true);
+  const { data } = useDatasetDetail(trackId, true);
+  const track = data && data.geometryKind === "track" ? (data as TrackDetail) : undefined;
   const timeWindow = useMapStore((state) => state.trackTimeWindows[trackId]);
   const selectedArea = useMapStore((state) => state.selectedArea);
   const hasFitRef = useRef(false);
@@ -25,7 +27,7 @@ export function TrackLayer({ trackId }: { trackId: string }) {
 
   const filteredPoints = useMemo(() => {
     if (!track) return [];
-    return filterTrackPoints(track.points, timeWindow, selectedArea);
+    return filterTrackPoints(track.points, timeWindow, selectedArea?.geometry ?? null);
   }, [track, timeWindow, selectedArea]);
 
   if (!track || track.points.length < 2) return null;

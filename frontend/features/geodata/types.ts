@@ -1,62 +1,53 @@
-import type { Point } from "geojson";
+import type { Point, Polygon } from "geojson";
+import type { components } from "@/types/generated";
 
-export type TrackSource = "geojson" | "gpx" | "synthetic";
+/**
+ * Derived from the backend's OpenAPI schema (types/generated.ts) — see the
+ * comment atop features/routing/types.ts for why, and what `Defined` does.
+ */
+type Defined<T> = { [K in keyof T]-?: T[K] };
 
-export type TrackPoint = {
-  id: string;
-  trackId: string;
-  geometry: Point;
-  dateRecorded: string;
-  elevationM: number | null;
-  speedMps: number | null;
+export type DatasetGeometryKind = components["schemas"]["DatasetGeometryKind"];
+
+/** Unified summary of a dataset of any geometry kind, for the browsing list. */
+export type Dataset = Defined<components["schemas"]["Dataset"]>;
+
+export type PaginatedDatasetsResponse = Omit<components["schemas"]["PaginatedDatasetsResponse"], "data"> & {
+  data: Dataset[];
 };
 
-export type Track = {
-  id: string;
-  name: string;
-  source: TrackSource;
-  pointCount: number;
-  dateCreated: string;
-  dateStart: string | null;
-  dateEnd: string | null;
-};
+export type TrackSource = components["schemas"]["TrackSource"];
 
-export type TrackDetail = Track & {
-  points: TrackPoint[];
-};
+export type TrackPoint = Defined<Omit<components["schemas"]["TrackPoint"], "geometry">> & { geometry: Point };
 
-export type PaginatedTracksResponse = {
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-  data: Track[];
-};
+export type Track = Defined<components["schemas"]["Track"]>;
 
-export type PointFeature = {
-  id: string;
-  datasetId: string;
-  geometry: Point;
-  category: string;
-  name: string | null;
-};
+export type TrackDetail = Defined<Omit<components["schemas"]["TrackDetail"], "points">> & { points: TrackPoint[] };
 
-export type PointDataset = {
-  id: string;
-  name: string;
-  pointCount: number;
-  categories: string[];
-  dateCreated: string;
-};
+export type PointFeature = Defined<Omit<components["schemas"]["PointFeature"], "geometry">> & { geometry: Point };
 
-export type PointDatasetDetail = PointDataset & {
+export type PointDataset = Defined<components["schemas"]["PointDataset"]>;
+
+export type PointDatasetDetail = Defined<Omit<components["schemas"]["PointDatasetDetail"], "points">> & {
   points: PointFeature[];
 };
 
-export type PaginatedPointDatasetsResponse = {
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-  data: PointDataset[];
+export type PolygonFeature = Defined<Omit<components["schemas"]["PolygonFeature"], "geometry">> & {
+  geometry: Polygon;
 };
+
+export type PolygonDataset = Defined<components["schemas"]["PolygonDataset"]>;
+
+export type PolygonDatasetDetail = Defined<Omit<components["schemas"]["PolygonDatasetDetail"], "polygons">> & {
+  polygons: PolygonFeature[];
+};
+
+/** Full detail for a dataset of any geometry kind — narrow on `geometryKind`. */
+export type DatasetDetail = PointDatasetDetail | TrackDetail | PolygonDatasetDetail;
+
+// Request types keep their natural optionality (defaulted fields may genuinely be omitted).
+export type LabelFeatureRequest = components["schemas"]["LabelFeatureRequest"];
+
+export type LabelTrackPointRequest = components["schemas"]["LabelTrackPointRequest"];
+
+export type BulkTagRequest = components["schemas"]["BulkTagRequest"];

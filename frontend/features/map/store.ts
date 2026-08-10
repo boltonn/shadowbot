@@ -1,61 +1,62 @@
-import type { Polygon } from "geojson";
 import { create } from "zustand";
-import type { Route } from "@/features/routing/types";
+import type { DrawMode, DrawnFeature } from "@/components/ui/map-draw";
+import type { Route, RouteAlternate } from "@/features/routing/types";
 import type { ChatLocation, TimeWindow } from "@/features/map/types";
+import type { Polygon } from "geojson";
 
 type MapState = {
   activeRoute: Route | null;
-  excludePolygons: Polygon[];
-  isExcludeMode: boolean;
-  visibleTrackIds: string[];
-  visiblePointDatasetIds: string[];
+  visibleDatasetIds: string[];
   chatLocations: ChatLocation[];
   trackTimeWindows: Record<string, TimeWindow>;
-  isAreaSelectMode: boolean;
-  selectedArea: Polygon | null;
+  areaSelectDrawMode: DrawMode | null;
+  selectedArea: DrawnFeature<Polygon> | null;
   setActiveRoute: (route: Route | null) => void;
-  addExcludePolygon: (polygon: Polygon) => void;
-  clearExcludePolygons: () => void;
-  setExcludeMode: (isExcludeMode: boolean) => void;
-  toggleTrackVisibility: (trackId: string) => void;
-  togglePointDatasetVisibility: (datasetId: string) => void;
+  selectAlternate: (alternateId: string) => void;
+  toggleDatasetVisibility: (datasetId: string) => void;
   addChatLocations: (locations: ChatLocation[]) => void;
   clearChatLocations: () => void;
   setTrackTimeWindow: (trackId: string, window: TimeWindow) => void;
   clearTrackTimeWindow: (trackId: string) => void;
-  setAreaSelectMode: (isAreaSelectMode: boolean) => void;
-  setSelectedArea: (polygon: Polygon | null) => void;
+  setAreaSelectDrawMode: (mode: DrawMode | null) => void;
+  setSelectedArea: (area: DrawnFeature<Polygon> | null) => void;
 };
 
 export const useMapStore = create<MapState>((set) => ({
   activeRoute: null,
-  excludePolygons: [],
-  isExcludeMode: false,
-  visibleTrackIds: [],
-  visiblePointDatasetIds: [],
+  visibleDatasetIds: [],
   chatLocations: [],
   trackTimeWindows: {},
-  isAreaSelectMode: false,
+  areaSelectDrawMode: null,
   selectedArea: null,
   setActiveRoute: (route) => set({ activeRoute: route }),
-  addExcludePolygon: (polygon) =>
+  selectAlternate: (alternateId) =>
+    set((state) => {
+      const current = state.activeRoute;
+      const chosen = current?.alternates.find((alternate) => alternate.id === alternateId);
+      if (!current || !chosen) return {};
+      const demoted: RouteAlternate = {
+        id: current.id,
+        geometry: current.geometry,
+        distanceM: current.distanceM,
+        durationS: current.durationS,
+      };
+      return {
+        activeRoute: {
+          ...current,
+          id: chosen.id,
+          geometry: chosen.geometry,
+          distanceM: chosen.distanceM,
+          durationS: chosen.durationS,
+          alternates: [demoted, ...current.alternates.filter((alternate) => alternate.id !== alternateId)],
+        },
+      };
+    }),
+  toggleDatasetVisibility: (datasetId) =>
     set((state) => ({
-      excludePolygons: [...state.excludePolygons, polygon],
-      isExcludeMode: false,
-    })),
-  clearExcludePolygons: () => set({ excludePolygons: [] }),
-  setExcludeMode: (isExcludeMode) => set({ isExcludeMode }),
-  toggleTrackVisibility: (trackId) =>
-    set((state) => ({
-      visibleTrackIds: state.visibleTrackIds.includes(trackId)
-        ? state.visibleTrackIds.filter((id) => id !== trackId)
-        : [...state.visibleTrackIds, trackId],
-    })),
-  togglePointDatasetVisibility: (datasetId) =>
-    set((state) => ({
-      visiblePointDatasetIds: state.visiblePointDatasetIds.includes(datasetId)
-        ? state.visiblePointDatasetIds.filter((id) => id !== datasetId)
-        : [...state.visiblePointDatasetIds, datasetId],
+      visibleDatasetIds: state.visibleDatasetIds.includes(datasetId)
+        ? state.visibleDatasetIds.filter((id) => id !== datasetId)
+        : [...state.visibleDatasetIds, datasetId],
     })),
   addChatLocations: (locations) =>
     set((state) => ({ chatLocations: [...state.chatLocations, ...locations] })),
@@ -70,6 +71,6 @@ export const useMapStore = create<MapState>((set) => ({
         Object.entries(state.trackTimeWindows).filter(([id]) => id !== trackId),
       ),
     })),
-  setAreaSelectMode: (isAreaSelectMode) => set({ isAreaSelectMode }),
-  setSelectedArea: (polygon) => set({ selectedArea: polygon }),
+  setAreaSelectDrawMode: (mode) => set({ areaSelectDrawMode: mode }),
+  setSelectedArea: (area) => set({ selectedArea: area }),
 }));

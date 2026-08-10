@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from shadowbot.agent.provider import LLMSettings
 from shadowbot.datastores.networkx.config import NetworkXRoutingConfig
 from shadowbot.datastores.postgres.config import PostgresConfig
+from shadowbot.datastores.valhalla.config import ValhallaRoutingConfig
 from shadowbot.integrations.nominatim import GeocodingConfig
 
 
@@ -17,6 +18,7 @@ class Settings(BaseSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     routing: NetworkXRoutingConfig = Field(default_factory=NetworkXRoutingConfig)
+    valhalla: ValhallaRoutingConfig = Field(default_factory=ValhallaRoutingConfig)
     geocoding: GeocodingConfig = Field(default_factory=GeocodingConfig)
 
     model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")

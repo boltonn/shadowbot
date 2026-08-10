@@ -9,6 +9,9 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   toll: Landmark,
 };
 
+/** Categories with a dedicated icon — offered as suggestions when uploading a point dataset. */
+export const KNOWN_CATEGORIES = Object.keys(CATEGORY_ICONS);
+
 /** Icon for a point category. Falls back to a generic pin for unrecognized categories. */
 export function iconForCategory(category: string): LucideIcon {
   return CATEGORY_ICONS[category.toLowerCase()] ?? MapPin;

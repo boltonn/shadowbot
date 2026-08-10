@@ -8,6 +8,7 @@ import {
   Database,
   GitCompare,
   History,
+  Locate,
   MapPin,
   MapPinned,
   Radar,
@@ -125,10 +126,10 @@ const toolGroups: ToolGroup[] = [
         name: "Nearby Search",
         functions: "find_nearby_poi",
         icon: MapPinned,
-        method: "Overpass tag query, ranked by radius",
+        method: "Overpass tag query, ranked by straight-line distance or Valhalla drive-time matrix",
         confidence: "DETERMINISTIC",
         description:
-          "Searches OpenStreetMap tags — amenity=fuel, shop=supermarket, and similar — within a radius of a point, across one or more categories in a single call, ranked by straight-line distance with an optional name or brand fuzzy match.",
+          "Searches OpenStreetMap tags — amenity=fuel, shop=supermarket, and similar — within a radius of a point, across one or more categories in a single call, with an optional name or brand fuzzy match. Ranked by straight-line distance by default; when the Valhalla routing backend is configured, the closest candidates by air are instead re-ranked by real drive time via a one-to-many time-distance matrix, since the nearest POI by straight line isn't always the nearest by road.",
       },
       {
         code: "POI-02",
@@ -165,13 +166,27 @@ const toolGroups: ToolGroup[] = [
         description:
           "Two-stage place-mining, following the standard stay-point-extraction approach for GPS trajectory data (Li et al., 2008). First, consecutive points that stay within a radius of each other for a minimum dwell time collapse into a single “stay point,” so one long stop counts once regardless of GPS sampling rate and slowly driving past a place doesn't count at all. Then every track's stay points are clustered by proximity with DBSCAN over haversine distance, so the same place visited on different days collapses into one location — ranked by visit count, for “where do they usually go” rather than reasoning over a single track.",
       },
+      {
+        code: "TRK-03",
+        name: "Map Matching",
+        functions: "match_track",
+        icon: Locate,
+        method: "Hidden Markov Model map matching (Valhalla Meili)",
+        confidence: "STATISTICAL",
+        description:
+          "Snaps a track's raw, noisy GPS points onto the road network it most likely actually drove, reconstructing real distance, duration, and path geometry instead of the raw pings' straight-line jitter. Valhalla-only — there's no networkx equivalent, so this is unavailable unless the Valhalla routing backend is configured, and says so rather than guessing a road from raw points.",
+      },
     ],
   },
 ];
 
 const stack = [
   { label: "Agent", detail: "FastAPI + pydantic-ai, streamed to the client over the Vercel AI SDK protocol" },
-  { label: "Routing engine", detail: "NetworkX + OSMnx over a locally cached OpenStreetMap road graph" },
+  {
+    label: "Routing engine",
+    detail:
+      "NetworkX + OSMnx over a locally cached OpenStreetMap road graph by default; optionally Valhalla, in-process over pre-built tiles, which also unlocks map matching and drive-time POI ranking",
+  },
   { label: "Geocoding & POI", detail: "Nominatim search and Overpass tag queries" },
   { label: "Persistence", detail: "Postgres for saved routes, tracks, and chat history" },
   { label: "Console", detail: "Next.js, MapLibre GL, and the Vercel AI SDK for the chat interface" },

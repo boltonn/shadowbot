@@ -25,5 +25,8 @@ class RouteTable(Base):
     )
     distance_m: Mapped[float] = mapped_column(Float, nullable=False)
     duration_s: Mapped[float] = mapped_column(Float, nullable=False)
-    avoid: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    # Everything else on Route (waypoints, network_type, avoid, legs, alternates) is nested,
+    # never queried structurally by Postgres, and grows over time — one JSONB blob for all of
+    # it means adding a field to Route never again requires a migration + hand-written mapping.
+    extra: Mapped[dict] = mapped_column(JSONB, nullable=False)
     date_created: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

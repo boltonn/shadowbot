@@ -14,7 +14,7 @@ export function useUploadPointDataset() {
     mutationFn: ({ name, file, categorySource }: UploadPointDatasetInput) =>
       uploadPointDataset(name, file, categorySource),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["point-datasets"] });
+      queryClient.invalidateQueries({ queryKey: ["datasets"] });
     },
   });
 }

@@ -2,15 +2,24 @@
 
 from dataclasses import dataclass
 
-from pydantic_ai import RunContext
+from pydantic_ai import ModelRetry, RunContext
 
 from shadowbot.analytics.frequented_locations import compute_frequented_locations
+from shadowbot.datastores.base.routing import RoutingRepository
 from shadowbot.datastores.networkx.poi import PoiRepository
-from shadowbot.datastores.networkx.repository import NetworkXRoutingRepository
+from shadowbot.datastores.postgres.repositories.point_dataset import PostgresPointDatasetRepository
+from shadowbot.datastores.postgres.repositories.polygon_dataset import PostgresPolygonDatasetRepository
 from shadowbot.datastores.postgres.repositories.route import PostgresRouteRepository
 from shadowbot.datastores.postgres.repositories.track import PostgresTrackRepository
 from shadowbot.integrations.nominatim import NominatimClient
 from shadowbot.schemas.poi import NearbyPoiRequest, Poi, RoutePoiRequest
+from shadowbot.schemas.point_dataset import (
+    PointDataset,
+    PointDatasetAlongRouteRequest,
+    PointDatasetsRequest,
+    PointFeatureOnRoute,
+)
+from shadowbot.schemas.polygon_dataset import PolygonDataset, PolygonDatasetsRequest
 from shadowbot.schemas.routing import (
     ArrivalEstimate,
     ArrivalEstimateRequest,
@@ -26,6 +35,7 @@ from shadowbot.schemas.routing import (
 from shadowbot.schemas.track import (
     FrequentedLocation,
     FrequentedLocationsRequest,
+    MapMatchResult,
     Track,
     TrackDetail,
     TracksRequest,
@@ -37,10 +47,12 @@ class AgentDeps:
     """Dependencies injected into every agent tool call."""
 
     geocoder: NominatimClient
-    routing: NetworkXRoutingRepository
+    routing: RoutingRepository
     routes: PostgresRouteRepository
     tracks: PostgresTrackRepository
     poi: PoiRepository
+    point_datasets: PostgresPointDatasetRepository
+    polygon_datasets: PostgresPolygonDatasetRepository
 
 
 async def geocode(ctx: RunContext[AgentDeps], query: str) -> list[GeocodeResult]:
@@ -110,18 +122,42 @@ async def find_nearby_poi(ctx: RunContext[AgentDeps], request: NearbyPoiRequest)
     """Find the closest points of interest to a location.
 
     Accepts one or more categories in a single call (e.g. the closest supermarket
-    to an address, or gas stations and coffee shops together).
+    to an address, or gas stations and coffee shops together). Ranked by real drive
+    time when the Valhalla routing backend is active, straight-line distance otherwise.
+
+    request.categories only covers common, curated types. For anything else (parks,
+    museums, dog parks, bike shops, etc.) pass request.raw_tags with the matching OSM
+    key/value tag instead — don't tell the user a search isn't supported just because
+    it isn't in the curated category list.
     """
-    return await ctx.deps.poi.find_near_point(request)
+    routing = ctx.deps.routing
+    if not routing.supports_matrix:
+        return await ctx.deps.poi.find_near_point(request)
+
+    # Overfetch by straight-line distance first — the true drive-time-closest POI isn't
+    # always among the very closest by air (a river or highway median can get in the way).
+    overfetch_request = request.model_copy(update={"limit": min(request.limit * 3, 20)})
+    candidates = await ctx.deps.poi.find_near_point(overfetch_request)
+    if not candidates:
+        return candidates
+
+    matrix = await routing.compute_matrix(origin=request.origin, destinations=[poi.geometry for poi in candidates])
+    ranked = [
+        poi.model_copy(update={"distance_m": entry.distance_m, "duration_s": entry.duration_s})
+        if entry.distance_m is not None
+        else poi
+        for poi, entry in zip(candidates, matrix, strict=True)
+    ]
+    ranked.sort(key=lambda poi: poi.duration_s if poi.duration_s is not None else float("inf"))
+    return ranked[: request.limit]
 
 
-async def find_poi_along_route(
-    ctx: RunContext[AgentDeps], route_id: str, request: RoutePoiRequest
-) -> list[Poi]:
+async def find_poi_along_route(ctx: RunContext[AgentDeps], route_id: str, request: RoutePoiRequest) -> list[Poi]:
     """Find points of interest within a corridor around a previously planned route.
 
     Accepts one or more categories in a single call (e.g. a gas station on the
-    way, or gas and coffee together).
+    way, or gas and coffee together). As with find_nearby_poi, use request.raw_tags
+    for anything outside the curated category list.
     """
     route = await ctx.deps.routes.get_route_by_id(route_id)
     if route is None:
@@ -138,6 +174,26 @@ async def list_tracks(ctx: RunContext[AgentDeps]) -> list[Track]:
 async def get_track(ctx: RunContext[AgentDeps], track_id: str) -> TrackDetail | None:
     """Retrieve a track's full point history by ID."""
     return await ctx.deps.tracks.get_track_by_id(track_id)
+
+
+async def match_track(ctx: RunContext[AgentDeps], track_id: str) -> MapMatchResult:
+    """Snap a track's raw GPS points onto the actual roads it drove.
+
+    Use this before reasoning about which specific roads or route a track took —
+    raw points are noisy and don't line up with the road network on their own.
+    Requires the Valhalla routing backend; say so if it's unavailable rather than
+    guessing a road from the raw points yourself.
+    """
+    track = await ctx.deps.tracks.get_track_by_id(track_id)
+    if track is None:
+        raise ValueError(f"Track not found: {track_id}")
+    if not ctx.deps.routing.supports_map_matching:
+        raise ModelRetry(
+            "Map matching requires the Valhalla routing backend, which isn't configured for this "
+            "deployment. Tell the user this feature is unavailable here and they'll need an "
+            "administrator to enable it (set VALHALLA__TILE_URI) — don't guess a road from the raw points."
+        )
+    return await ctx.deps.routing.match_track(track=track)
 
 
 async def find_frequented_locations(
@@ -168,3 +224,34 @@ async def find_frequented_locations(
         min_visits=request.min_visits,
         limit=request.limit,
     )
+
+
+async def list_point_datasets(ctx: RunContext[AgentDeps]) -> list[PointDataset]:
+    """List previously uploaded custom point datasets (e.g. speed cameras, hazards, or any other user-supplied POIs).
+
+    These are distinct from find_nearby_poi/find_poi_along_route, which search OSM's
+    built-in categories (gas stations, restaurants, etc.) — use this and
+    find_point_dataset_along_route instead for anything the user uploaded themselves.
+    """
+    result = await ctx.deps.point_datasets.get_point_datasets(PointDatasetsRequest())
+    return result.data
+
+
+async def find_point_dataset_along_route(
+    ctx: RunContext[AgentDeps], dataset_id: str, route_id: str, request: PointDatasetAlongRouteRequest
+) -> list[PointFeatureOnRoute]:
+    """Find features from an uploaded point dataset within a corridor around a previously planned route.
+
+    Use this to answer questions like 'how many camera lights do I pass on this route' —
+    call list_point_datasets first if you don't already know the right dataset_id.
+    """
+    route = await ctx.deps.routes.get_route_by_id(route_id)
+    if route is None:
+        raise ValueError(f"Route not found: {route_id}")
+    return await ctx.deps.point_datasets.find_along_route(dataset_id, route, request)
+
+
+async def list_polygon_datasets(ctx: RunContext[AgentDeps]) -> list[PolygonDataset]:
+    """List previously uploaded custom polygon datasets (e.g. school zones, restricted areas, boundaries)."""
+    result = await ctx.deps.polygon_datasets.get_polygon_datasets(PolygonDatasetsRequest())
+    return result.data

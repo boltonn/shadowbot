@@ -1,11 +1,12 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
-from geojson_pydantic import Point
+from geojson_pydantic import LineString, Point
 from pydantic import Field
 
 from shadowbot.schemas.base import CamelModel
-from shadowbot.schemas.common import SortOrder
+from shadowbot.schemas.common import DatasetGeometryKind, SortOrder
 
 
 class TrackSource(StrEnum):
@@ -23,6 +24,7 @@ class TrackPointCreate(CamelModel):
     date_recorded: datetime
     elevation_m: float | None = Field(default=None)
     speed_mps: float | None = Field(default=None)
+    tags: list[str] = Field(default_factory=list)
 
 
 class TrackPoint(TrackPointCreate):
@@ -45,8 +47,10 @@ class Track(CamelModel):
 
     id: str
     name: str
+    geometry_kind: Literal[DatasetGeometryKind.TRACK] = DatasetGeometryKind.TRACK
     source: TrackSource
     point_count: int = Field(default=0)
+    tags: list[str] = Field(default_factory=list)
     date_created: datetime
     date_start: datetime | None = Field(default=None)
     date_end: datetime | None = Field(default=None)
@@ -56,6 +60,20 @@ class TrackDetail(Track):
     """A track including its full set of points."""
 
     points: list[TrackPoint] = Field(default_factory=list)
+
+
+class MapMatchResult(CamelModel):
+    """A track's raw GPS points snapped onto the actual roads it drove.
+
+    Requires the Valhalla routing backend (map matching over raw networkx/osmnx
+    graphs isn't implemented) — see datastores/valhalla/repository.py.
+    """
+
+    track_id: str
+    geometry: LineString
+    distance_m: float
+    duration_s: float
+    date_created: datetime
 
 
 class TracksRequest(CamelModel):

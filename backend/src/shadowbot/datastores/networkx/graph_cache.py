@@ -18,7 +18,7 @@ from geojson_pydantic import Point
 from loguru import logger
 
 from shadowbot.datastores.networkx.config import NetworkXRoutingConfig
-from shadowbot.datastores.networkx.overpass_retry import with_overpass_retry
+from shadowbot.integrations.overpass import call_with_retry
 
 _METERS_PER_DEGREE = 111_320
 _TILE_DEGREES = 0.1  # ~11km grid — requests within the same tile reuse one cached fetch
@@ -76,7 +76,6 @@ def _get_graph_for_bbox(
 ) -> nx.MultiDiGraph:
     config.cache_dir.mkdir(parents=True, exist_ok=True)
     graph_path = config.cache_dir / f"{_bbox_slug(bbox, network_type)}.graphml"
-    ox.settings.overpass_url = config.overpass_url
 
     if graph_path.exists():
         logger.info(f"Loading cached OSM graph tile from {graph_path}")
@@ -86,7 +85,9 @@ def _get_graph_for_bbox(
         f"Fetching OSM graph tile {bbox} ({network_type}) via Overpass ({config.overpass_url}) "
         "— first request in this area, may take a moment"
     )
-    graph = with_overpass_retry(lambda: ox.graph_from_bbox(bbox, network_type=network_type))
+    graph = call_with_retry(
+        overpass_url=config.overpass_url, fetch=lambda: ox.graph_from_bbox(bbox, network_type=network_type)
+    )
     graph = _finalize_graph(graph)
     ox.save_graphml(graph, graph_path)
     logger.info(f"Cached OSM graph tile to {graph_path}")

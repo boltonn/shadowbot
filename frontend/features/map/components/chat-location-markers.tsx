@@ -2,18 +2,24 @@
 
 import { useEffect } from "react";
 import {
+  Banknote,
   BatteryCharging,
+  CircleDot,
   Coffee,
   Fuel,
   History,
   Hospital,
   Hotel,
+  Landmark,
   MapPin,
   ParkingCircle,
   Pill,
   ShoppingCart,
   Sofa,
+  Tent,
+  Trees,
   Utensils,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { MapMarker, MarkerContent, MarkerTooltip, useMap } from "@/components/ui/map";
@@ -21,7 +27,9 @@ import { useMapStore } from "@/features/map/store";
 import { fitToCoordinates } from "@/features/map/lib/fit-bounds";
 import type { ChatLocationKind } from "@/features/map/types";
 
-const ICONS: Record<ChatLocationKind, LucideIcon> = {
+// Only the curated ChatLocationKind values get a dedicated icon. Anything else
+// (raw OSM "key=value" tags from POI search) falls back to the "custom" pin below.
+const ICONS: Partial<Record<ChatLocationKind, LucideIcon>> = {
   geocode: MapPin,
   frequented: History,
   gas_station: Fuel,
@@ -34,6 +42,12 @@ const ICONS: Record<ChatLocationKind, LucideIcon> = {
   hotel: Hotel,
   pharmacy: Pill,
   hospital: Hospital,
+  park: Trees,
+  bank: Landmark,
+  atm: Banknote,
+  car_repair: Wrench,
+  campground: Tent,
+  custom: CircleDot,
 };
 
 export function ChatLocationMarkers() {
@@ -51,7 +65,7 @@ export function ChatLocationMarkers() {
   return (
     <>
       {chatLocations.map((location) => {
-        const Icon = ICONS[location.kind];
+        const Icon = ICONS[location.kind] ?? CircleDot;
         return (
           <MapMarker key={location.id} longitude={location.longitude} latitude={location.latitude}>
             <MarkerContent>

@@ -56,6 +56,17 @@ class RouteRequest(CamelModel):
     )
     network_type: NetworkType = Field(default=NetworkType.DRIVE)
     avoid: AvoidancePreferences = Field(default_factory=AvoidancePreferences)
+    max_alternates: int = Field(
+        default=0,
+        ge=0,
+        le=3,
+        description=(
+            "Additional alternative paths to compute alongside the primary route "
+            "(Valhalla backend only). Only honored when waypoints is empty — Valhalla "
+            "doesn't support alternates for multi-stop trips, so this is silently ignored "
+            "if waypoints are set."
+        ),
+    )
 
 
 class RerouteRequest(CamelModel):
@@ -66,6 +77,25 @@ class RerouteRequest(CamelModel):
         default=False,
         description="Exclude the previously computed route's own path, for 'take a different way'",
     )
+
+
+class RouteAlternate(CamelModel):
+    """A less-preferred path between the same origin and destination as a computed route."""
+
+    id: str
+    geometry: LineString
+    distance_m: float
+    duration_s: float
+
+
+class RouteLeg(CamelModel):
+    """One point-to-point segment of a route, between consecutive origin/waypoint/destination stops."""
+
+    origin: Point
+    destination: Point
+    geometry: LineString
+    distance_m: float
+    duration_s: float
 
 
 class Route(CamelModel):
@@ -80,6 +110,8 @@ class Route(CamelModel):
     waypoints: list[Point] = Field(default_factory=list)
     network_type: NetworkType = Field(default=NetworkType.DRIVE)
     avoid: AvoidancePreferences
+    legs: list[RouteLeg] = Field(default_factory=list, description="Per-stop segments; >1 entry when waypoints are set")
+    alternates: list[RouteAlternate] = Field(default_factory=list)
     date_created: datetime
 
 
@@ -137,3 +169,10 @@ class Isochrone(CamelModel):
     reachable_node_count: int = Field(
         description="Number of road-network nodes within the time budget — a rough density signal"
     )
+
+
+class MatrixEntry(CamelModel):
+    """One source→target pair from a time-distance matrix. None fields mean unreachable by road."""
+
+    distance_m: float | None
+    duration_s: float | None

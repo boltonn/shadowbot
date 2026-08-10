@@ -6,7 +6,6 @@ import { BookOpen } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChatPanel } from "@/features/chat/components/chat-panel";
-import { RoutingPanel } from "@/features/routing/components/routing-panel";
 import { GeodataPanel } from "@/features/geodata/components/geodata-panel";
 import { MapView } from "@/features/map/components/map-view";
 import { ResizableSidebar } from "@/components/resizable-sidebar";
@@ -60,25 +59,16 @@ export default function Home() {
                 Chat
               </TabsTrigger>
               <TabsTrigger
-                value="routes"
-                className="h-10 flex-1 rounded-none font-mono text-[11px] tracking-[0.15em] uppercase after:bg-signal data-active:text-signal"
-              >
-                Routes
-              </TabsTrigger>
-              <TabsTrigger
                 value="geodata"
                 className="h-10 flex-1 rounded-none font-mono text-[11px] tracking-[0.15em] uppercase after:bg-signal data-active:text-signal"
               >
                 Geodata
               </TabsTrigger>
             </TabsList>
-            <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
+            <TabsContent value="chat" keepMounted className="flex min-h-0 flex-1 flex-col">
               <ChatPanel />
             </TabsContent>
-            <TabsContent value="routes" className="min-h-0 flex-1 overflow-y-auto">
-              <RoutingPanel />
-            </TabsContent>
-            <TabsContent value="geodata" className="min-h-0 flex-1 overflow-y-auto">
+            <TabsContent value="geodata" keepMounted className="min-h-0 flex-1 overflow-y-auto">
               <GeodataPanel />
             </TabsContent>
           </Tabs>

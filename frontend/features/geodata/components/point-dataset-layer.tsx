@@ -5,8 +5,8 @@ import type { FeatureCollection, Point } from "geojson";
 import * as MapLibreGL from "maplibre-gl";
 import type { GeoJSONSource, MapGeoJSONFeature, MapMouseEvent } from "maplibre-gl";
 import { MapMarker, MapPopup, MarkerContent, MarkerTooltip, useMap } from "@/components/ui/map";
-import { usePointDatasetDetail } from "@/features/geodata/hooks/use-point-dataset-detail";
-import type { PointFeature } from "@/features/geodata/types";
+import { useDatasetDetail } from "@/features/geodata/hooks/use-dataset-detail";
+import type { PointDatasetDetail, PointFeature } from "@/features/geodata/types";
 import { categoryColorMatchExpression, colorForCategory, iconForCategory } from "@/features/geodata/lib/category-icons";
 import { fitToCoordinates } from "@/features/map/lib/fit-bounds";
 
@@ -31,7 +31,8 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection<Point, PointProperties> = { ty
 
 export function PointDatasetLayer({ datasetId }: { datasetId: string }) {
   const { map } = useMap();
-  const { data: dataset } = usePointDatasetDetail(datasetId, true);
+  const { data } = useDatasetDetail(datasetId, true);
+  const dataset = data && data.geometryKind === "point" ? (data as PointDatasetDetail) : undefined;
   const hasFitRef = useRef(false);
 
   useEffect(() => {

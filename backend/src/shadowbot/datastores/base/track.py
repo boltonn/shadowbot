@@ -2,7 +2,15 @@
 
 from abc import ABC, abstractmethod
 
-from shadowbot.schemas.track import PaginatedTracksResponse, Track, TrackCreate, TrackDetail, TracksRequest
+from shadowbot.schemas.dataset import BulkTagRequest, LabelTrackPointRequest
+from shadowbot.schemas.track import (
+    PaginatedTracksResponse,
+    Track,
+    TrackCreate,
+    TrackDetail,
+    TrackPoint,
+    TracksRequest,
+)
 
 
 class TrackRepository(ABC):
@@ -19,3 +27,11 @@ class TrackRepository(ABC):
     @abstractmethod
     async def get_tracks(self, request: TracksRequest) -> PaginatedTracksResponse:
         """List track summaries."""
+
+    @abstractmethod
+    async def label_feature(self, track_id: str, point_id: str, request: LabelTrackPointRequest) -> TrackPoint:
+        """Update a track point's tags."""
+
+    @abstractmethod
+    async def bulk_tag_features(self, track_id: str, request: BulkTagRequest) -> list[TrackPoint]:
+        """Apply and/or remove tags across a set of a track's points."""

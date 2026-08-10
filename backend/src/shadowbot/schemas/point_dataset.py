@@ -1,10 +1,11 @@
 from datetime import datetime
+from typing import Literal
 
 from geojson_pydantic import Point
 from pydantic import Field
 
 from shadowbot.schemas.base import CamelModel
-from shadowbot.schemas.common import SortOrder
+from shadowbot.schemas.common import DatasetGeometryKind, SortOrder
 
 
 class PointFeatureCreate(CamelModel):
@@ -13,6 +14,7 @@ class PointFeatureCreate(CamelModel):
     geometry: Point
     category: str
     name: str | None = Field(default=None)
+    tags: list[str] = Field(default_factory=list)
 
 
 class PointFeature(PointFeatureCreate):
@@ -34,8 +36,10 @@ class PointDataset(CamelModel):
 
     id: str
     name: str
+    geometry_kind: Literal[DatasetGeometryKind.POINT] = DatasetGeometryKind.POINT
     point_count: int = Field(default=0)
     categories: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     date_created: datetime
 
 
@@ -61,3 +65,19 @@ class PaginatedPointDatasetsResponse(CamelModel):
     limit: int
     total_pages: int
     data: list[PointDataset]
+
+
+class PointDatasetAlongRouteRequest(CamelModel):
+    """Find a point dataset's features within a corridor around a previously planned route."""
+
+    category: str | None = Field(default=None, description="Filter to one category, e.g. 'camera_light'")
+    corridor_m: float = Field(
+        default=100, gt=0, le=5_000, description="How far off the route path still counts as 'passed'"
+    )
+    limit: int = Field(default=50, ge=1, le=500)
+
+
+class PointFeatureOnRoute(PointFeature):
+    """A point dataset feature located along a route, with its distance to the route path."""
+
+    distance_m: float
