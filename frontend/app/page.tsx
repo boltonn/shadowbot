@@ -28,7 +28,6 @@ export default function Home() {
           <span className="font-mono text-xs font-medium tracking-[0.2em] text-foreground uppercase">
             Shadowbot
           </span>
-          <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-signal" />
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger
