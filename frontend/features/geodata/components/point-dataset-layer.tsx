@@ -9,6 +9,7 @@ import { useDatasetDetail } from "@/features/geodata/hooks/use-dataset-detail";
 import type { PointDatasetDetail, PointFeature } from "@/features/geodata/types";
 import { categoryColorMatchExpression, colorForCategory, iconForCategory } from "@/features/geodata/lib/category-icons";
 import { fitToCoordinates } from "@/features/map/lib/fit-bounds";
+import { useMapStore } from "@/features/map/store";
 
 // Below this many points, render individual icon markers — the map stays
 // legible and icons carry more information than a colored dot. At or above
@@ -33,6 +34,7 @@ export function PointDatasetLayer({ datasetId }: { datasetId: string }) {
   const { map } = useMap();
   const { data } = useDatasetDetail(datasetId, true);
   const dataset = data && data.geometryKind === "point" ? (data as PointDatasetDetail) : undefined;
+  const filterSet = useMapStore((state) => state.filteredFeatureIds[datasetId]) ?? null;
   const hasFitRef = useRef(false);
 
   useEffect(() => {
@@ -46,11 +48,13 @@ export function PointDatasetLayer({ datasetId }: { datasetId: string }) {
 
   if (!dataset) return null;
 
-  if (dataset.points.length <= ICON_MODE_MAX_POINTS) {
-    return <PointDatasetIcons points={dataset.points} />;
+  const points = filterSet ? dataset.points.filter((point) => filterSet.has(point.id)) : dataset.points;
+
+  if (points.length <= ICON_MODE_MAX_POINTS) {
+    return <PointDatasetIcons points={points} />;
   }
 
-  return <PointDatasetCluster datasetId={datasetId} points={dataset.points} categories={dataset.categories} />;
+  return <PointDatasetCluster datasetId={datasetId} points={points} categories={dataset.categories} />;
 }
 
 /** Small datasets: one icon marker per point, colored and shaped by category. */

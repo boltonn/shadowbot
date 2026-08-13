@@ -2,9 +2,10 @@ from datetime import datetime
 from enum import StrEnum
 
 from geojson_pydantic import LineString, Point, Polygon
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from shadowbot.schemas.base import CamelModel
+from shadowbot.schemas.poi import OsmTag, PoiCategory
 
 
 class NetworkType(StrEnum):
@@ -121,6 +122,98 @@ class Route(CamelModel):
     legs: list[RouteLeg] = Field(default_factory=list, description="Per-stop segments; >1 entry when waypoints are set")
     alternates: list[RouteAlternate] = Field(default_factory=list)
     date_created: datetime
+
+
+class AreaMatch(CamelModel):
+    """An area feature (a park, lake, mall, or any other tagged polygon) a candidate route passes through."""
+
+    name: str | None = Field(default=None)
+    category: PoiCategory | str = Field(
+        description="A PoiCategory value, or 'key=value' for a match found via through_raw_tags"
+    )
+    geometry: Polygon
+    area_m2: float
+    exit_count: int = Field(
+        description=(
+            "Distinct points where the road/path network crosses the feature's outer boundary — a heuristic "
+            "proxy for entrances/exits, since OSM entrance tagging is too inconsistent to rely on directly."
+        )
+    )
+
+
+class RouteSearchCriteria(CamelModel):
+    """Criteria for generating and filtering candidate routes, rather than planning one specific route.
+
+    Mode and avoidance map directly onto routing-engine inputs. The through_* area criteria can't
+    be expressed to the routing engine at all, so every generated candidate is checked against them
+    after the fact, and only candidates clearing every requested threshold are returned.
+    """
+
+    origin: Point
+    destination: Point
+    network_type: NetworkType = Field(default=NetworkType.DRIVE)
+    avoid: AvoidancePreferences = Field(default_factory=AvoidancePreferences)
+    avoid_places: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Free-text places or roads to avoid, e.g. 'I-95' or 'downtown' — geocoded and excluded with a "
+            "buffer of avoid_radius_m, combined with any structured avoid preferences."
+        ),
+    )
+    avoid_radius_m: float = Field(default=300, gt=0, le=5_000)
+    through_categories: list[PoiCategory] = Field(
+        default_factory=list,
+        description="e.g. [park] to require the route pass through a park; combine freely with through_raw_tags",
+    )
+    through_raw_tags: list[OsmTag] = Field(
+        default_factory=list,
+        description=(
+            "Raw OSM key/value tags for an area feature not in PoiCategory, e.g. {key: 'natural', value: "
+            "'water'} for a lake or {key: 'shop', value: 'mall'}. Use common OSM tagging conventions "
+            "directly rather than refusing a search just because it isn't in the curated category list."
+        ),
+    )
+    min_area_m2: float | None = Field(
+        default=None, gt=0, description="Minimum area of the through_categories/through_raw_tags feature"
+    )
+    min_area_exits: int | None = Field(
+        default=None, ge=1, description="Minimum exit_count of the through_categories/through_raw_tags feature"
+    )
+    area_corridor_m: float = Field(
+        default=50, gt=0, le=500, description="How close the route must pass to the area feature to count as going through it"
+    )
+    max_candidates: int = Field(
+        default=3,
+        ge=1,
+        le=3,
+        description=(
+            "Alternative paths to consider beyond the primary route (Valhalla backend only — the "
+            "networkx fallback only ever produces the primary route)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _require_area_tags_if_area_criteria(self) -> "RouteSearchCriteria":
+        wants_area = self.min_area_m2 is not None or self.min_area_exits is not None
+        if wants_area and not self.through_categories and not self.through_raw_tags:
+            raise ValueError("through_categories or through_raw_tags is required when min_area_m2/min_area_exits is set")
+        return self
+
+
+class RouteSearchMatch(CamelModel):
+    """One candidate route that satisfied every criterion in a RouteSearchCriteria search."""
+
+    route: Route
+    matched_area: AreaMatch | None = Field(
+        default=None, description="The qualifying area feature the route passes through, when area criteria were set"
+    )
+
+
+class RouteCompareRequest(CamelModel):
+    """Two previously computed routes to compare."""
+
+    route_id_a: str
+    route_id_b: str
 
 
 class RouteComparison(CamelModel):

@@ -64,6 +64,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/routes/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search Routes
+         * @description Generate candidate routes between two points and keep only those matching every criterion.
+         */
+        post: operations["search_routes_routes_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/routes/{route_id}/reroute": {
         parameters: {
             query?: never;
@@ -78,6 +98,68 @@ export interface paths {
          * @description Recompute a prior route with additional avoidance constraints.
          */
         post: operations["reroute_routes__route_id__reroute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/routes/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compare Routes
+         * @description Compare two previously planned routes: which is shorter/faster and how much their paths overlap.
+         */
+        post: operations["compare_routes_routes_compare_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/routes/{route_id}/arrival-estimate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Estimate Arrival
+         * @description Estimate arrival time for a planned route given a departure time.
+         *
+         *     This is a time-of-day/day-of-week heuristic, not live traffic.
+         */
+        post: operations["estimate_arrival_routes__route_id__arrival_estimate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/isochrone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Isochrone
+         * @description Compute the area reachable from a point within a time budget, over the real road network.
+         */
+        post: operations["isochrone_isochrone_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -226,6 +308,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/geodata/datasets/points/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Tabular Points
+         * @description Preview a CSV/Excel file's columns and a sample of rows before uploading it as a point dataset.
+         */
+        post: operations["preview_tabular_points_geodata_datasets_points_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/geodata/datasets/points/upload": {
         parameters: {
             query?: never;
@@ -237,10 +339,12 @@ export interface paths {
         put?: never;
         /**
          * Upload Point Dataset
-         * @description Upload a GeoJSON FeatureCollection of categorized Point features as a new point dataset.
+         * @description Upload a GeoJSON, CSV, or Excel file of categorized Point features as a new point dataset.
          *
-         *     Categorize either by naming a property present on each feature (`type_field`,
-         *     e.g. "type") or, for a uniform dataset, by passing a single `default_type`.
+         *     Categorize either by naming a property/column present on each feature (`type_field`,
+         *     e.g. "type") or, for a uniform dataset, by passing a single `default_type`. CSV/Excel
+         *     files have no inherent geometry, so `lat_field`/`lon_field` name the columns to read
+         *     coordinates from; every other column is carried over as filterable `properties`.
          */
         post: operations["upload_point_dataset_geodata_datasets_points_upload_post"];
         delete?: never;
@@ -405,6 +509,72 @@ export interface components {
             hasServerKey: boolean;
         };
         /**
+         * AreaMatch
+         * @description An area feature (a park, lake, mall, or any other tagged polygon) a candidate route passes through.
+         */
+        AreaMatch: {
+            /** Name */
+            name?: string | null;
+            /**
+             * Category
+             * @description A PoiCategory value, or 'key=value' for a match found via through_raw_tags
+             */
+            category: components["schemas"]["PoiCategory"] | string;
+            geometry: components["schemas"]["Polygon"];
+            /** Aream2 */
+            areaM2: number;
+            /**
+             * Exitcount
+             * @description Distinct points where the road/path network crosses the feature's outer boundary — a heuristic proxy for entrances/exits, since OSM entrance tagging is too inconsistent to rely on directly.
+             */
+            exitCount: number;
+        };
+        /**
+         * ArrivalEstimate
+         * @description A congestion-adjusted arrival estimate for a route.
+         *
+         *     There's no live traffic feed here — this applies a static time-of-day/day-of-week
+         *     heuristic to the route's free-flow duration. Treat it as a rough estimate, not a
+         *     real-time prediction.
+         */
+        ArrivalEstimate: {
+            /** Routeid */
+            routeId: string;
+            /**
+             * Datedeparture
+             * Format: date-time
+             */
+            dateDeparture: string;
+            /**
+             * Datearrival
+             * Format: date-time
+             */
+            dateArrival: string;
+            /**
+             * Freeflowdurations
+             * @description The route's duration with no congestion adjustment
+             */
+            freeFlowDurationS: number;
+            /**
+             * Estimateddurations
+             * @description Duration after applying the time-of-day heuristic
+             */
+            estimatedDurationS: number;
+            /** Congestionmultiplier */
+            congestionMultiplier: number;
+        };
+        /**
+         * ArrivalEstimateRequest
+         * @description Estimate an arrival time for a previously planned route given a departure time.
+         */
+        ArrivalEstimateRequest: {
+            /**
+             * Datedeparture
+             * Format: date-time
+             */
+            dateDeparture: string;
+        };
+        /**
          * AvoidancePreferences
          * @description Constraints applied when computing a route.
          *
@@ -435,6 +605,11 @@ export interface components {
             /** Excludepolygons */
             excludePolygons?: components["schemas"]["Polygon"][];
         };
+        /** Body_preview_tabular_points_geodata_datasets_points_preview_post */
+        Body_preview_tabular_points_geodata_datasets_points_preview_post: {
+            /** File */
+            file: string;
+        };
         /** Body_upload_point_dataset_geodata_datasets_points_upload_post */
         Body_upload_point_dataset_geodata_datasets_points_upload_post: {
             /** File */
@@ -445,6 +620,10 @@ export interface components {
             type_field?: string | null;
             /** Default Type */
             default_type?: string | null;
+            /** Lat Field */
+            lat_field?: string | null;
+            /** Lon Field */
+            lon_field?: string | null;
         };
         /** Body_upload_polygon_dataset_geodata_datasets_polygons_upload_post */
         Body_upload_polygon_dataset_geodata_datasets_polygons_upload_post: {
@@ -573,6 +752,33 @@ export interface components {
             status: string;
         };
         /**
+         * Isochrone
+         * @description The reachable area from a point within a time budget, over the real road network.
+         */
+        Isochrone: {
+            origin: components["schemas"]["Point"];
+            /** Minutes */
+            minutes: number;
+            geometry: components["schemas"]["Polygon"];
+            /**
+             * Reachablenodecount
+             * @description Number of road-network nodes within the time budget — a rough density signal
+             */
+            reachableNodeCount: number;
+        };
+        /**
+         * IsochroneRequest
+         * @description Request the reachable area from a point within a time budget.
+         */
+        IsochroneRequest: {
+            origin: components["schemas"]["Point"];
+            /** Minutes */
+            minutes: number;
+            /** @default drive */
+            networkType: components["schemas"]["NetworkType"];
+            avoid?: components["schemas"]["AvoidancePreferences"];
+        };
+        /**
          * LabelFeatureRequest
          * @description Replace a point/polygon feature's category, name, and tags with the given values.
          *
@@ -650,6 +856,18 @@ export interface components {
          */
         NetworkType: "drive" | "drive_service" | "walk" | "bike" | "all";
         /**
+         * OsmTag
+         * @description A raw OSM key/value tag pair, for POI categories outside the curated list.
+         *
+         *     e.g. key="leisure", value="dog_park" or key="tourism", value="museum".
+         */
+        OsmTag: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: string;
+        };
+        /**
          * PaginatedDatasetsResponse
          * @description Paginated list of dataset summaries across all geometry kinds.
          */
@@ -665,6 +883,16 @@ export interface components {
             /** Data */
             data: components["schemas"]["Dataset"][];
         };
+        /**
+         * PoiCategory
+         * @description Curated, well-known POI categories with dedicated frontend icons.
+         *
+         *     Not exhaustive — OSM has hundreds of amenity/shop/leisure/tourism tags. For
+         *     anything not listed here, pass raw_tags on the request instead of waiting
+         *     for it to be added to this enum.
+         * @enum {string}
+         */
+        PoiCategory: "gas_station" | "ev_charging" | "supermarket" | "restaurant" | "coffee" | "parking" | "rest_area" | "hotel" | "pharmacy" | "hospital" | "park" | "bank" | "atm" | "car_repair" | "campground";
         /**
          * Point
          * @description Point Model
@@ -766,6 +994,13 @@ export interface components {
             name?: string | null;
             /** Tags */
             tags?: string[];
+            /**
+             * Properties
+             * @description Arbitrary extra columns/properties carried over from the uploaded file
+             */
+            properties?: {
+                [key: string]: unknown;
+            };
             /** Id */
             id: string;
             /** Datasetid */
@@ -950,6 +1185,41 @@ export interface components {
             durationS: number;
         };
         /**
+         * RouteCompareRequest
+         * @description Two previously computed routes to compare.
+         */
+        RouteCompareRequest: {
+            /** Routeida */
+            routeIdA: string;
+            /** Routeidb */
+            routeIdB: string;
+        };
+        /**
+         * RouteComparison
+         * @description A comparison between two previously computed routes.
+         */
+        RouteComparison: {
+            /** Routeaid */
+            routeAId: string;
+            /** Routebid */
+            routeBId: string;
+            /**
+             * Distancedeltam
+             * @description route_b's distance minus route_a's; negative means b is shorter
+             */
+            distanceDeltaM: number;
+            /**
+             * Durationdeltas
+             * @description route_b's duration minus route_a's; negative means b is faster
+             */
+            durationDeltaS: number;
+            /**
+             * Sharedpathfraction
+             * @description Fraction of the two routes' combined length that follows the same path (within ~30m)
+             */
+            sharedPathFraction: number;
+        };
+        /**
          * RouteLeg
          * @description One point-to-point segment of a route, between consecutive origin/waypoint/destination stops.
          */
@@ -983,6 +1253,86 @@ export interface components {
              * @default 0
              */
             maxAlternates: number;
+        };
+        /**
+         * RouteSearchCriteria
+         * @description Criteria for generating and filtering candidate routes, rather than planning one specific route.
+         *
+         *     Mode and avoidance map directly onto routing-engine inputs. The through_* area criteria can't
+         *     be expressed to the routing engine at all, so every generated candidate is checked against them
+         *     after the fact, and only candidates clearing every requested threshold are returned.
+         */
+        RouteSearchCriteria: {
+            origin: components["schemas"]["Point"];
+            destination: components["schemas"]["Point"];
+            /** @default drive */
+            networkType: components["schemas"]["NetworkType"];
+            avoid?: components["schemas"]["AvoidancePreferences"];
+            /**
+             * Avoidplaces
+             * @description Free-text places or roads to avoid, e.g. 'I-95' or 'downtown' — geocoded and excluded with a buffer of avoid_radius_m, combined with any structured avoid preferences.
+             */
+            avoidPlaces?: string[];
+            /**
+             * Avoidradiusm
+             * @default 300
+             */
+            avoidRadiusM: number;
+            /**
+             * Throughcategories
+             * @description e.g. [park] to require the route pass through a park; combine freely with through_raw_tags
+             */
+            throughCategories?: components["schemas"]["PoiCategory"][];
+            /**
+             * Throughrawtags
+             * @description Raw OSM key/value tags for an area feature not in PoiCategory, e.g. {key: 'natural', value: 'water'} for a lake or {key: 'shop', value: 'mall'}. Use common OSM tagging conventions directly rather than refusing a search just because it isn't in the curated category list.
+             */
+            throughRawTags?: components["schemas"]["OsmTag"][];
+            /**
+             * Minaream2
+             * @description Minimum area of the through_categories/through_raw_tags feature
+             */
+            minAreaM2?: number | null;
+            /**
+             * Minareaexits
+             * @description Minimum exit_count of the through_categories/through_raw_tags feature
+             */
+            minAreaExits?: number | null;
+            /**
+             * Areacorridorm
+             * @description How close the route must pass to the area feature to count as going through it
+             * @default 50
+             */
+            areaCorridorM: number;
+            /**
+             * Maxcandidates
+             * @description Alternative paths to consider beyond the primary route (Valhalla backend only — the networkx fallback only ever produces the primary route).
+             * @default 3
+             */
+            maxCandidates: number;
+        };
+        /**
+         * RouteSearchMatch
+         * @description One candidate route that satisfied every criterion in a RouteSearchCriteria search.
+         */
+        RouteSearchMatch: {
+            route: components["schemas"]["Route"];
+            /** @description The qualifying area feature the route passes through, when area criteria were set */
+            matchedArea?: components["schemas"]["AreaMatch"] | null;
+        };
+        /**
+         * TabularPreview
+         * @description A preview of an uploaded CSV/Excel file's columns, used to map lat/long/category fields before upload.
+         */
+        TabularPreview: {
+            /** Columns */
+            columns: string[];
+            /** Samplerows */
+            sampleRows?: {
+                [key: string]: unknown;
+            }[];
+            /** Rowcount */
+            rowCount: number;
         };
         /**
          * Track
@@ -1188,6 +1538,39 @@ export interface operations {
             };
         };
     };
+    search_routes_routes_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteSearchCriteria"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteSearchMatch"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     reroute_routes__route_id__reroute_post: {
         parameters: {
             query?: never;
@@ -1210,6 +1593,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Route"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compare_routes_routes_compare_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteCompareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteComparison"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    estimate_arrival_routes__route_id__arrival_estimate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                route_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArrivalEstimateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArrivalEstimate"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    isochrone_isochrone_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IsochroneRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Isochrone"];
                 };
             };
             /** @description Validation Error */
@@ -1440,6 +1924,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrackPoint"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_tabular_points_geodata_datasets_points_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_preview_tabular_points_geodata_datasets_points_preview_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TabularPreview"];
                 };
             };
             /** @description Validation Error */

@@ -1,0 +1,24 @@
+import { apiClient } from "@/lib/api-client";
+import type {
+  ArrivalEstimate,
+  ArrivalEstimateRequest,
+  RerouteRequest,
+  Route,
+  RouteSearchCriteria,
+  RouteSearchMatch,
+} from "@/features/routing/types";
+
+export async function reroute(routeId: string, body: RerouteRequest): Promise<Route> {
+  const response = await apiClient.post<Route>(`/routes/${routeId}/reroute`, body);
+  return response.data;
+}
+
+export async function searchRoutes(body: RouteSearchCriteria): Promise<RouteSearchMatch[]> {
+  const response = await apiClient.post<RouteSearchMatch[]>("/routes/search", body);
+  return response.data;
+}
+
+export async function estimateArrival(routeId: string, body: ArrivalEstimateRequest): Promise<ArrivalEstimate> {
+  const response = await apiClient.post<ArrivalEstimate>(`/routes/${routeId}/arrival-estimate`, body);
+  return response.data;
+}

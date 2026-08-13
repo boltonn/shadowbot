@@ -155,7 +155,12 @@ class PostgresDatasetRepository:
                 {
                     "type": "Feature",
                     "geometry": point.geometry.model_dump(mode="json"),
-                    "properties": {"category": point.category, "name": point.name, "tags": point.tags},
+                    "properties": {
+                        **point.properties,
+                        "category": point.category,
+                        "name": point.name,
+                        "tags": point.tags,
+                    },
                 }
                 for point in detail.points
             ]

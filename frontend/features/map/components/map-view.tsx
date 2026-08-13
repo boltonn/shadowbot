@@ -3,6 +3,8 @@
 import { Map } from "@/components/ui/map";
 import { MapHud } from "@/features/map/components/map-hud";
 import { MapLayers } from "@/features/map/components/map-layers";
+import { AddStopLayer } from "@/features/routing/components/add-stop-layer";
+import { RouteSummary } from "@/features/routing/components/route-summary";
 
 const mapStyles = {
   light: process.env.NEXT_PUBLIC_MAP_STYLE_LIGHT,
@@ -20,6 +22,8 @@ export function MapView() {
     >
       <MapLayers />
       <MapHud />
+      <RouteSummary />
+      <AddStopLayer />
     </Map>
   );
 }

@@ -10,6 +10,7 @@ import type {
   PointFeature,
   PolygonDataset,
   PolygonFeature,
+  TabularPreview,
   Track,
   TrackPoint,
 } from "@/features/geodata/types";
@@ -60,14 +61,26 @@ function appendCategorySource(formData: FormData, categorySource: UploadCategory
   }
 }
 
+export async function previewTabularPoints(file: File): Promise<TabularPreview> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await apiClient.post<TabularPreview>("/geodata/datasets/points/preview", formData);
+  return response.data;
+}
+
 export async function uploadPointDataset(
   name: string,
   file: File,
   categorySource: UploadCategorySource,
+  latLonFields?: { latField: string; lonField: string },
 ): Promise<PointDataset> {
   const formData = new FormData();
   formData.append("name", name);
   appendCategorySource(formData, categorySource);
+  if (latLonFields) {
+    formData.append("lat_field", latLonFields.latField);
+    formData.append("lon_field", latLonFields.lonField);
+  }
   formData.append("file", file);
   const response = await apiClient.post<PointDataset>("/geodata/datasets/points/upload", formData);
   return response.data;

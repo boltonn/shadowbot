@@ -94,6 +94,36 @@ class PaginatedTracksResponse(CamelModel):
     data: list[Track]
 
 
+class LocationClassificationRule(CamelModel):
+    """Tunable thresholds for guessing a frequented location's category from visit timing.
+
+    Defaults assume a typical daytime work schedule. Override when a person's pattern
+    differs — e.g. a night-shift worker's "home" dwells cluster during the day, not after
+    night_hour_start, so night_hour_start/night_hour_end should shift to match.
+    """
+
+    night_hour_start: int = Field(default=19, ge=0, le=23, description="Hour a 'home' night window begins")
+    night_hour_end: int = Field(default=6, ge=0, le=23, description="Hour a 'home' night window ends (exclusive)")
+    home_min_night_share: float = Field(
+        default=0.6, gt=0, le=1, description="Share of visits that must fall in the night window to guess 'home'"
+    )
+    home_min_dwell_h: float = Field(default=4, gt=0, description="Minimum average dwell hours to guess 'home'")
+    work_hour_start: int = Field(default=5, ge=0, le=23, description="Hour a 'work' morning window begins")
+    work_hour_end: int = Field(default=11, ge=0, le=23, description="Hour a 'work' morning window ends (exclusive)")
+    work_min_morning_share: float = Field(
+        default=0.6,
+        gt=0,
+        le=1,
+        description="Share of weekday visits that must start in the morning window to guess 'work'",
+    )
+    work_dwell_h_range: tuple[float, float] = Field(
+        default=(2.0, 12.0), description="Average dwell hours range (inclusive) to guess 'work'"
+    )
+    min_visits_to_classify: int = Field(
+        default=2, ge=1, description="Minimum separate visits before guessing home/work at all"
+    )
+
+
 class FrequentedLocationsRequest(CamelModel):
     """Cluster GPS track history to find places visited more than once."""
 
@@ -106,6 +136,10 @@ class FrequentedLocationsRequest(CamelModel):
     )
     min_visits: int = Field(default=2, ge=1, description="Minimum separate visits to surface a location")
     limit: int = Field(default=10, ge=1, le=50)
+    classification: LocationClassificationRule = Field(
+        default_factory=LocationClassificationRule,
+        description="Tune the home/work heuristic when the person's schedule is atypical",
+    )
 
 
 class LocationCategoryGuess(StrEnum):
@@ -131,3 +165,4 @@ class FrequentedLocation(CamelModel):
             "so it can be overridden with anything, e.g. 'gym', 'kid's school'"
         ),
     )
+    name: str | None = Field(default=None, description="A saved name for this location, e.g. 'Gym'")

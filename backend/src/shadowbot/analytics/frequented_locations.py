@@ -17,14 +17,10 @@ import numpy as np
 from geojson_pydantic import Point
 from sklearn.cluster import DBSCAN
 
-from shadowbot.schemas.track import FrequentedLocation, LocationCategoryGuess, TrackPoint
+from shadowbot.schemas.location_label import LocationLabel
+from shadowbot.schemas.track import FrequentedLocation, LocationCategoryGuess, LocationClassificationRule, TrackPoint
 
 _EARTH_RADIUS_M = 6_371_000
-
-_NIGHT_HOUR_START = 19
-_NIGHT_HOUR_END = 6
-_WORKDAY_MORNING_HOURS = range(5, 11)
-_MIN_VISITS_TO_CLASSIFY = 2
 
 
 @dataclass
@@ -72,26 +68,32 @@ def _extract_stay_points(points: list[TrackPoint], radius_m: float, min_dwell_s:
     return stay_points
 
 
-def _is_night_hour(hour: int) -> bool:
-    return hour >= _NIGHT_HOUR_START or hour < _NIGHT_HOUR_END
+def _is_in_window(hour: int, start: int, end: int) -> bool:
+    """Whether hour falls in a [start, end) window, wrapping past midnight when start > end."""
+    if start <= end:
+        return start <= hour < end
+    return hour >= start or hour < end
 
 
-def _guess_category(cluster: list[_StayPoint]) -> str:
+def _guess_category(cluster: list[_StayPoint], rule: LocationClassificationRule) -> str:
     """Guess home/work from visit timing; anything else is left unknown for the person to label."""
-    if len(cluster) < _MIN_VISITS_TO_CLASSIFY:
+    if len(cluster) < rule.min_visits_to_classify:
         return LocationCategoryGuess.UNKNOWN
 
     avg_dwell_h = sum((sp.date_departure - sp.date_arrival).total_seconds() for sp in cluster) / len(cluster) / 3600
-    night_share = sum(_is_night_hour(sp.date_arrival.hour) for sp in cluster) / len(cluster)
-    if night_share >= 0.6 and avg_dwell_h >= 4:
+    night_share = sum(
+        _is_in_window(sp.date_arrival.hour, rule.night_hour_start, rule.night_hour_end) for sp in cluster
+    ) / len(cluster)
+    if night_share >= rule.home_min_night_share and avg_dwell_h >= rule.home_min_dwell_h:
         return LocationCategoryGuess.HOME
 
     weekday_visits = [sp for sp in cluster if sp.date_arrival.weekday() < 5]
     if weekday_visits:
-        morning_start_share = sum(sp.date_arrival.hour in _WORKDAY_MORNING_HOURS for sp in weekday_visits) / len(
-            weekday_visits
-        )
-        if morning_start_share >= 0.6 and 2 <= avg_dwell_h <= 12:
+        morning_share = sum(
+            _is_in_window(sp.date_arrival.hour, rule.work_hour_start, rule.work_hour_end) for sp in weekday_visits
+        ) / len(weekday_visits)
+        low, high = rule.work_dwell_h_range
+        if morning_share >= rule.work_min_morning_share and low <= avg_dwell_h <= high:
             return LocationCategoryGuess.WORK
 
     return LocationCategoryGuess.UNKNOWN
@@ -103,6 +105,7 @@ def compute_frequented_locations(
     min_dwell_s: float,
     min_visits: int,
     limit: int,
+    rule: LocationClassificationRule,
 ) -> list[FrequentedLocation]:
     """Find places visited more than once across one or more tracks' point histories."""
     stay_points = [
@@ -137,9 +140,35 @@ def compute_frequented_locations(
                 total_dwell_s=sum((sp.date_departure - sp.date_arrival).total_seconds() for sp in cluster),
                 date_first_visit=min(sp.date_arrival for sp in cluster),
                 date_last_visit=max(sp.date_arrival for sp in cluster),
-                category=_guess_category(cluster),
+                category=_guess_category(cluster, rule),
             )
         )
 
     locations.sort(key=lambda location: location.visit_count, reverse=True)
     return locations[:limit]
+
+
+def apply_location_labels(
+    locations: list[FrequentedLocation], saved_labels: list[LocationLabel], radius_m: float
+) -> list[FrequentedLocation]:
+    """Override each location's category/name with a matching saved label, if one is nearby.
+
+    Matching reuses the same radius_m the caller already used to cluster stay points into
+    one place, so "close enough to be a saved label" means the same thing as "close enough
+    to be one location" elsewhere in this module.
+    """
+    results = []
+    for location in locations:
+        lon, lat = location.geometry.coordinates[:2]
+        match = next(
+            (
+                saved
+                for saved in saved_labels
+                if _haversine_m(lon, lat, *saved.geometry.coordinates[:2]) <= radius_m
+            ),
+            None,
+        )
+        if match is not None:
+            location = location.model_copy(update={"category": match.category, "name": match.name})
+        results.append(location)
+    return results

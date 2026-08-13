@@ -26,6 +26,8 @@ export type TrackDetail = Defined<Omit<components["schemas"]["TrackDetail"], "po
 
 export type PointFeature = Defined<Omit<components["schemas"]["PointFeature"], "geometry">> & { geometry: Point };
 
+export type TabularPreview = Defined<components["schemas"]["TabularPreview"]>;
+
 export type PointDataset = Defined<components["schemas"]["PointDataset"]>;
 
 export type PointDatasetDetail = Defined<Omit<components["schemas"]["PointDatasetDetail"], "points">> & {

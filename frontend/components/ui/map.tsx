@@ -10,6 +10,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useEffectEvent,
   useId,
   useImperativeHandle,
   useMemo,
@@ -256,8 +257,9 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
 
   const isControlled = viewport !== undefined && onViewportChange !== undefined;
 
-  const onViewportChangeRef = useRef(onViewportChange);
-  onViewportChangeRef.current = onViewportChange;
+  const notifyViewportChange = useEffectEvent((nextViewport: MapViewport) => {
+    onViewportChange?.(nextViewport);
+  });
 
   const stableStyles = useStableValue(styles);
 
@@ -307,7 +309,7 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     // Viewport change handler - skip if triggered by internal update
     const handleMove = () => {
       if (internalUpdateRef.current) return;
-      onViewportChangeRef.current?.(getViewport(map));
+      notifyViewportChange(getViewport(map));
     };
 
     // Basemap sprite sheets occasionally lag their style.json on the CDN edge,
@@ -383,7 +385,9 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
   useEffect(() => {
     if (!mapInstance || !pendingStyle) return;
 
-    setPendingStyle(null);
+    // Not cleared back to null: currentStyleRef already gates re-queuing a style that's
+    // already pending/applied (see the effect above), so there's nothing left for a
+    // "no pending style" resting value to do here.
     styleSwapInFlightRef.current = true;
     // Full reload (no diff) so `style.load` fires deterministically. A
     // successful diff would never fire it, leaving isStyleLoaded stuck false.

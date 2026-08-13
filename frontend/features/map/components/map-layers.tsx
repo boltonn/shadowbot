@@ -15,6 +15,8 @@ export function MapLayers() {
   const { map } = useMap();
   const activeRoute = useMapStore((state) => state.activeRoute);
   const selectAlternate = useMapStore((state) => state.selectAlternate);
+  const matchedRoutes = useMapStore((state) => state.matchedRoutes);
+  const selectMatchedRoute = useMapStore((state) => state.selectMatchedRoute);
   const visibleDatasetIds = useMapStore((state) => state.visibleDatasetIds);
 
   useEffect(() => {
@@ -22,9 +24,25 @@ export function MapLayers() {
     fitToCoordinates(map, activeRoute.geometry.coordinates as [number, number][]);
   }, [map, activeRoute]);
 
+  useEffect(() => {
+    if (!map || matchedRoutes.length === 0) return;
+    fitToCoordinates(map, matchedRoutes.flatMap((match) => match.route.geometry.coordinates as [number, number][]));
+  }, [map, matchedRoutes]);
+
   return (
     <>
       <AreaSelectLayer />
+      {matchedRoutes.map((match) => (
+        <MapRoute
+          key={match.route.id}
+          id={`route-match-${match.route.id}`}
+          coordinates={match.route.geometry.coordinates as [number, number][]}
+          color="#f6ad55"
+          width={4}
+          opacity={0.7}
+          onClick={() => selectMatchedRoute(match.route.id)}
+        />
+      ))}
       {activeRoute?.alternates.map((alternate) => (
         <MapRoute
           key={alternate.id}

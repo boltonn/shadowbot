@@ -6,6 +6,7 @@ const LOCATION_TOOL_NAMES = new Set([
   "find_poi_along_route",
   "find_frequented_locations",
   "find_point_dataset_along_route",
+  "save_location_label",
 ]);
 
 export function isLocationTool(toolName: string): boolean {
@@ -62,11 +63,14 @@ function toFrequentedLocation(item: unknown, id: string): ChatLocation | null {
   if (!isRecord(item)) return null;
   const coords = pointCoordinates(item.geometry);
   if (!coords) return null;
+  const category = typeof item.category === "string" ? item.category : "unknown";
   const visitCount = typeof item.visitCount === "number" ? item.visitCount : null;
+  const name = typeof item.name === "string" && item.name ? item.name : null;
+  const baseLabel = name ?? (category === "unknown" ? "Frequented location" : category.replace(/_/g, " "));
   return {
     id,
-    kind: "frequented",
-    label: visitCount ? `Visited ${visitCount}x` : "Frequented location",
+    kind: category === "unknown" ? "frequented" : category,
+    label: visitCount ? `${baseLabel} · Visited ${visitCount}x` : baseLabel,
     longitude: coords[0],
     latitude: coords[1],
   };
@@ -81,20 +85,30 @@ function toDatasetFeatureLocation(item: unknown, id: string): ChatLocation | nul
   return { id, kind: "custom", label, longitude: coords[0], latitude: coords[1] };
 }
 
+function toLocationLabel(item: unknown, id: string): ChatLocation | null {
+  if (!isRecord(item)) return null;
+  const coords = pointCoordinates(item.geometry);
+  if (!coords) return null;
+  const category = typeof item.category === "string" ? item.category : "custom";
+  const label = typeof item.name === "string" && item.name ? item.name : category.replace(/_/g, " ");
+  return { id, kind: category, label, longitude: coords[0], latitude: coords[1] };
+}
+
 /** Turns a finished location tool call's output into map-plottable locations. */
 export function extractChatLocations(toolName: string, toolCallId: string, output: unknown): ChatLocation[] {
-  if (!Array.isArray(output)) return [];
-
   const toLocation = {
     geocode: toGeocodeLocation,
     find_nearby_poi: toPoiLocation,
     find_poi_along_route: toPoiLocation,
     find_frequented_locations: toFrequentedLocation,
     find_point_dataset_along_route: toDatasetFeatureLocation,
+    save_location_label: toLocationLabel,
   }[toolName];
   if (!toLocation) return [];
 
-  return output
+  // Most location tools return a list; save_location_label returns the single saved label.
+  const items = Array.isArray(output) ? output : [output];
+  return items
     .map((item, index) => toLocation(item, `${toolCallId}-${index}`))
     .filter((location): location is ChatLocation => location !== null);
 }

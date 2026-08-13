@@ -4,14 +4,18 @@ from dataclasses import dataclass
 
 from pydantic_ai import ModelRetry, RunContext
 
-from shadowbot.analytics.frequented_locations import compute_frequented_locations
+from shadowbot.analytics.frequented_locations import apply_location_labels, compute_frequented_locations
+from shadowbot.analytics.route_search import search_routes as compute_route_search
 from shadowbot.datastores.base.routing import RoutingRepository
+from shadowbot.datastores.networkx.area_features import AreaFeatureFinder
 from shadowbot.datastores.networkx.poi import PoiRepository
+from shadowbot.datastores.postgres.repositories.location_label import PostgresLocationLabelRepository
 from shadowbot.datastores.postgres.repositories.point_dataset import PostgresPointDatasetRepository
 from shadowbot.datastores.postgres.repositories.polygon_dataset import PostgresPolygonDatasetRepository
 from shadowbot.datastores.postgres.repositories.route import PostgresRouteRepository
 from shadowbot.datastores.postgres.repositories.track import PostgresTrackRepository
 from shadowbot.integrations.nominatim import NominatimClient
+from shadowbot.schemas.location_label import LocationLabel, LocationLabelCreate
 from shadowbot.schemas.poi import NearbyPoiRequest, Poi, RoutePoiRequest
 from shadowbot.schemas.point_dataset import (
     PointDataset,
@@ -31,6 +35,8 @@ from shadowbot.schemas.routing import (
     Route,
     RouteComparison,
     RouteRequest,
+    RouteSearchCriteria,
+    RouteSearchMatch,
 )
 from shadowbot.schemas.track import (
     FrequentedLocation,
@@ -51,8 +57,10 @@ class AgentDeps:
     routes: PostgresRouteRepository
     tracks: PostgresTrackRepository
     poi: PoiRepository
+    areas: AreaFeatureFinder
     point_datasets: PostgresPointDatasetRepository
     polygon_datasets: PostgresPolygonDatasetRepository
+    location_labels: PostgresLocationLabelRepository
 
 
 async def geocode(ctx: RunContext[AgentDeps], query: str) -> list[GeocodeResult]:
@@ -69,6 +77,23 @@ async def plan_route(ctx: RunContext[AgentDeps], request: RouteRequest) -> Route
     """
     route = await ctx.deps.routing.compute_route(request)
     return await ctx.deps.routes.add_route(route)
+
+
+async def search_routes(ctx: RunContext[AgentDeps], request: RouteSearchCriteria) -> list[RouteSearchMatch]:
+    """Generate candidate routes between an origin and destination and keep only those matching every criterion.
+
+    Use this instead of plan_route when the person describes constraints a single planned route
+    can't express directly — travel mode, named places/roads to avoid (geocoded automatically), and/or
+    passing through an area feature (a park, lake, mall, etc., via request.through_categories/
+    through_raw_tags — same OSM tagging convention as find_nearby_poi) that meets a minimum size
+    and/or a minimum number of boundary crossings ("exits"). Each returned match's route is already
+    planned and persisted, ready to pass to reroute/compare_routes/estimate_arrival like any other.
+    An empty result means no candidate satisfied every criterion — say so rather than relaxing the
+    request's criteria yourself.
+    """
+    return await compute_route_search(
+        request, routing=ctx.deps.routing, routes=ctx.deps.routes, areas=ctx.deps.areas, geocoder=ctx.deps.geocoder
+    )
 
 
 async def reroute(ctx: RunContext[AgentDeps], route_id: str, request: RerouteRequest) -> Route:
@@ -210,6 +235,12 @@ async def find_frequented_locations(
     Distinct visits are inferred from dwell time, not raw point density, so a long
     stop doesn't get overcounted and slowly driving past a place doesn't count at
     all. Useful for 'where do they usually go' rather than reasoning over one track.
+
+    The home/work guess comes from request.classification, which assumes a typical
+    daytime schedule — adjust its time windows when the person describes something
+    else (night shift, remote work, etc.) rather than trusting a guess that doesn't
+    fit. A returned location's category/name may reflect a prior correction saved via
+    save_location_label rather than the heuristic guess.
     """
     if request.track_ids is not None:
         track_ids = request.track_ids
@@ -223,13 +254,29 @@ async def find_frequented_locations(
         if detail is not None:
             points_by_track.append(detail.points)
 
-    return compute_frequented_locations(
+    locations = compute_frequented_locations(
         points_by_track,
         radius_m=request.radius_m,
         min_dwell_s=request.min_dwell_s,
         min_visits=request.min_visits,
         limit=request.limit,
+        rule=request.classification,
     )
+    saved_labels = await ctx.deps.location_labels.get_location_labels()
+    return apply_location_labels(locations, saved_labels, radius_m=request.radius_m)
+
+
+async def save_location_label(ctx: RunContext[AgentDeps], request: LocationLabelCreate) -> LocationLabel:
+    """Save a person's correction or name for a frequented location, e.g. 'that's the gym'.
+
+    Call this immediately whenever the person corrects, disagrees with, or supplies a name
+    for a location from a prior find_frequented_locations result — replying in text alone
+    ("noted", "I'll remember that") does not persist anything; only this call does. Pass the
+    exact geometry of the location being labeled from that prior result, not a re-geocoded
+    point. Future find_frequented_locations calls automatically apply the label to anything
+    within that call's radius_m of the saved point, overriding the home/work/unknown guess.
+    """
+    return await ctx.deps.location_labels.save_location_label(request)
 
 
 async def list_point_datasets(ctx: RunContext[AgentDeps]) -> list[PointDataset]:

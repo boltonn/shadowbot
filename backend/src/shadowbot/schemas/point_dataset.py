@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from geojson_pydantic import Point
 from pydantic import Field
@@ -15,6 +15,9 @@ class PointFeatureCreate(CamelModel):
     category: str
     name: str | None = Field(default=None)
     tags: list[str] = Field(default_factory=list)
+    properties: dict[str, Any] = Field(
+        default_factory=dict, description="Arbitrary extra columns/properties carried over from the uploaded file"
+    )
 
 
 class PointFeature(PointFeatureCreate):
@@ -81,3 +84,11 @@ class PointFeatureOnRoute(PointFeature):
     """A point dataset feature located along a route, with its distance to the route path."""
 
     distance_m: float
+
+
+class TabularPreview(CamelModel):
+    """A preview of an uploaded CSV/Excel file's columns, used to map lat/long/category fields before upload."""
+
+    columns: list[str]
+    sample_rows: list[dict[str, Any]] = Field(default_factory=list)
+    row_count: int

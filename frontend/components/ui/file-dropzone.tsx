@@ -6,6 +6,10 @@ import { cn } from "@/lib/utils";
 
 export const GEOJSON_ACCEPT = ".geojson,.json,application/geo+json,application/json";
 
+export const TABULAR_ACCEPT = ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+export const POINT_UPLOAD_ACCEPT = `${GEOJSON_ACCEPT},${TABULAR_ACCEPT}`;
+
 type FileDropzoneProps = {
   file: File | null;
   onSelect: (file: File | null) => void;

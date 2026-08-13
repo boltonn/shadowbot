@@ -1,6 +1,8 @@
+import io
 import json
 from datetime import datetime
 
+import pandas as pd
 from fastapi import APIRouter, Form, HTTPException, Response, UploadFile
 from geojson_pydantic import Point, Polygon
 
@@ -25,6 +27,7 @@ from shadowbot.schemas.point_dataset import (
     PointDatasetCreate,
     PointFeature,
     PointFeatureCreate,
+    TabularPreview,
 )
 from shadowbot.schemas.polygon_dataset import (
     PolygonDataset,
@@ -174,14 +177,76 @@ def _parse_geojson_point_features(
         category = properties.get(type_field) if type_field else default_type
         if not category:
             raise ValueError(f"Point {index} is missing a '{type_field}' property")
+        extra = {k: v for k, v in properties.items() if k not in {type_field, "name", "label"}}
         points.append(
             PointFeatureCreate(
                 geometry=Point(**geometry),
                 category=str(category),
                 name=properties.get("name") or properties.get("label"),
+                properties=extra,
             )
         )
     return points
+
+
+def _read_tabular_file(filename: str, raw: bytes) -> pd.DataFrame:
+    """Parse an uploaded CSV or Excel file into a DataFrame."""
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if suffix == "csv":
+        return pd.read_csv(io.BytesIO(raw))
+    if suffix == "xlsx":
+        return pd.read_excel(io.BytesIO(raw), engine="openpyxl")
+    raise ValueError(f"Unsupported file type '{suffix}' — expected .csv or .xlsx")
+
+
+def _parse_tabular_points(
+    df: pd.DataFrame, lat_field: str, lon_field: str, type_field: str | None, default_type: str | None
+) -> tuple[list[PointFeatureCreate], int]:
+    """Convert a DataFrame's rows into categorized Point features, skipping rows with invalid coordinates.
+
+    Every column besides the designated lat/lon/category/name fields is carried over as-is
+    into each point's `properties`, so uploaded data stays filterable by any original column.
+    """
+    if not type_field and not default_type:
+        raise ValueError("Provide either a type field name or a default type")
+    if lat_field not in df.columns or lon_field not in df.columns:
+        raise ValueError(f"Columns '{lat_field}' and/or '{lon_field}' not found in the uploaded file")
+
+    lat = pd.to_numeric(df[lat_field], errors="coerce")
+    lon = pd.to_numeric(df[lon_field], errors="coerce")
+    valid = lat.between(-90, 90) & lon.between(-180, 180)
+    skipped = int((~valid).sum())
+
+    records = json.loads(df.loc[valid].to_json(orient="records"))
+    reserved = {lat_field, lon_field, type_field, "name", "label"}
+
+    points = []
+    for lat_value, lon_value, record in zip(lat[valid], lon[valid], records, strict=True):
+        category = record.get(type_field) if type_field else default_type
+        if not category:
+            raise ValueError(f"Row is missing a '{type_field}' value")
+        properties = {k: v for k, v in record.items() if k not in reserved}
+        points.append(
+            PointFeatureCreate(
+                geometry=Point(type="Point", coordinates=(lon_value, lat_value)),
+                category=str(category),
+                name=record.get("name") or record.get("label"),
+                properties=properties,
+            )
+        )
+    return points, skipped
+
+
+@router.post("/datasets/points/preview")
+async def preview_tabular_points(file: UploadFile) -> TabularPreview:
+    """Preview a CSV/Excel file's columns and a sample of rows before uploading it as a point dataset."""
+    try:
+        df = _read_tabular_file(file.filename or "", await file.read())
+    except Exception as exc:  # noqa: BLE001 - surfaces malformed file content as a 422
+        raise HTTPException(status_code=422, detail=f"Could not read file: {exc}") from exc
+
+    sample_rows = json.loads(df.head(20).to_json(orient="records"))
+    return TabularPreview(columns=list(df.columns), sample_rows=sample_rows, row_count=len(df))
 
 
 @router.post("/datasets/points/upload")
@@ -191,17 +256,38 @@ async def upload_point_dataset(
     name: str = Form(...),
     type_field: str | None = Form(default=None),
     default_type: str | None = Form(default=None),
+    lat_field: str | None = Form(default=None),
+    lon_field: str | None = Form(default=None),
 ) -> PointDataset:
-    """Upload a GeoJSON FeatureCollection of categorized Point features as a new point dataset.
+    """Upload a GeoJSON, CSV, or Excel file of categorized Point features as a new point dataset.
 
-    Categorize either by naming a property present on each feature (`type_field`,
-    e.g. "type") or, for a uniform dataset, by passing a single `default_type`.
+    Categorize either by naming a property/column present on each feature (`type_field`,
+    e.g. "type") or, for a uniform dataset, by passing a single `default_type`. CSV/Excel
+    files have no inherent geometry, so `lat_field`/`lon_field` name the columns to read
+    coordinates from; every other column is carried over as filterable `properties`.
     """
+    filename = file.filename or ""
+    raw = await file.read()
+    is_tabular = filename.lower().endswith((".csv", ".xlsx"))
+
     try:
-        raw = json.loads(await file.read())
-        points = _parse_geojson_point_features(raw, type_field=type_field, default_type=default_type)
+        if is_tabular:
+            if not lat_field or not lon_field:
+                raise ValueError("lat_field and lon_field are required for CSV/Excel uploads")
+            df = _read_tabular_file(filename, raw)
+            points, _skipped = _parse_tabular_points(
+                df, lat_field=lat_field, lon_field=lon_field, type_field=type_field, default_type=default_type
+            )
+        else:
+            points = _parse_geojson_point_features(
+                json.loads(raw), type_field=type_field, default_type=default_type
+            )
     except (json.JSONDecodeError, ValueError, KeyError) as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid GeoJSON upload: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"Invalid upload: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 - malformed CSV/Excel content surfaces as a 422, not a 500
+        if not is_tabular:
+            raise
+        raise HTTPException(status_code=422, detail=f"Invalid upload: {exc}") from exc
 
     return await point_dataset_repository.add_point_dataset(PointDatasetCreate(name=name, points=points))
 

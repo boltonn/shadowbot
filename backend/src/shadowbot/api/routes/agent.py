@@ -40,9 +40,11 @@ from sse_starlette.sse import EventSourceResponse
 
 from shadowbot.agent.core import build_agent
 from shadowbot.agent.tools import AgentDeps
+from shadowbot.api.deps.area_features import AreaFeatureDatastoreDep
 from shadowbot.api.deps.poi import PoiDatastoreDep
 from shadowbot.api.deps.postgres import (
     ChatDatastoreDep,
+    LocationLabelDatastoreDep,
     PointDatasetDatastoreDep,
     PolygonDatasetDatastoreDep,
     RouteDatastoreDep,
@@ -201,8 +203,10 @@ async def chat(
     routes: RouteDatastoreDep,
     tracks: TrackDatastoreDep,
     poi: PoiDatastoreDep,
+    areas: AreaFeatureDatastoreDep,
     point_datasets: PointDatasetDatastoreDep,
     polygon_datasets: PolygonDatasetDatastoreDep,
+    location_labels: LocationLabelDatastoreDep,
 ) -> EventSourceResponse:
     """Stream an agent turn as an AI SDK UI Message Stream."""
     session = await chat_repository.get_or_create_session(request.session_id)
@@ -213,8 +217,10 @@ async def chat(
         routes=routes,
         tracks=tracks,
         poi=poi,
+        areas=areas,
         polygon_datasets=polygon_datasets,
         point_datasets=point_datasets,
+        location_labels=location_labels,
     )
 
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()

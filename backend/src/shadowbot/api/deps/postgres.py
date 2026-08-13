@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI
 from shadowbot.api.settings import Settings
 from shadowbot.datastores.postgres.repositories.chat import PostgresChatRepository
 from shadowbot.datastores.postgres.repositories.dataset import PostgresDatasetRepository
+from shadowbot.datastores.postgres.repositories.location_label import PostgresLocationLabelRepository
 from shadowbot.datastores.postgres.repositories.point_dataset import PostgresPointDatasetRepository
 from shadowbot.datastores.postgres.repositories.polygon_dataset import PostgresPolygonDatasetRepository
 from shadowbot.datastores.postgres.repositories.route import PostgresRouteRepository
@@ -61,9 +62,16 @@ async def get_dataset_repository() -> AsyncGenerator[PostgresDatasetRepository, 
         yield PostgresDatasetRepository(session=session)
 
 
+async def get_location_label_repository() -> AsyncGenerator[PostgresLocationLabelRepository, None]:
+    """Dependency injector for PostgresLocationLabelRepository."""
+    async with get_session(settings.postgres) as session:
+        yield PostgresLocationLabelRepository(session=session)
+
+
 TrackDatastoreDep = Annotated[PostgresTrackRepository, Depends(get_track_repository)]
 RouteDatastoreDep = Annotated[PostgresRouteRepository, Depends(get_route_repository)]
 ChatDatastoreDep = Annotated[PostgresChatRepository, Depends(get_chat_repository)]
 PointDatasetDatastoreDep = Annotated[PostgresPointDatasetRepository, Depends(get_point_dataset_repository)]
 PolygonDatasetDatastoreDep = Annotated[PostgresPolygonDatasetRepository, Depends(get_polygon_dataset_repository)]
 DatasetDatastoreDep = Annotated[PostgresDatasetRepository, Depends(get_dataset_repository)]
+LocationLabelDatastoreDep = Annotated[PostgresLocationLabelRepository, Depends(get_location_label_repository)]

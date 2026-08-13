@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from geoalchemy2 import Geometry
 from sqlalchemy import ARRAY, DateTime, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shadowbot.datastores.postgres.tables.base import Base
@@ -36,5 +37,8 @@ class PointDatasetFeatureTable(Base):
     category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tags: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
+    # Arbitrary extra columns from an uploaded CSV/Excel/GeoJSON file, beyond
+    # category/name/tags — an open bag, never queried structurally by Postgres.
+    properties: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     dataset: Mapped["PointDatasetTable"] = relationship(back_populates="points")

@@ -6,8 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FileDropzone } from "@/components/ui/file-dropzone";
+import { FileDropzone, POINT_UPLOAD_ACCEPT } from "@/components/ui/file-dropzone";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DatasetTable } from "@/features/geodata/components/dataset-table";
@@ -15,13 +16,24 @@ import { TrackTimeSlider } from "@/features/geodata/components/track-time-slider
 import { useDatasetDetail } from "@/features/geodata/hooks/use-dataset-detail";
 import { useDatasets } from "@/features/geodata/hooks/use-datasets";
 import { useDownloadDataset } from "@/features/geodata/hooks/use-download-dataset";
+import { usePreviewTabularPoints } from "@/features/geodata/hooks/use-preview-tabular-points";
 import { useUploadPointDataset } from "@/features/geodata/hooks/use-upload-point-dataset";
 import { useUploadPolygonDataset } from "@/features/geodata/hooks/use-upload-polygon-dataset";
 import { useUploadTrack } from "@/features/geodata/hooks/use-upload-track";
 import { colorForCategory, KNOWN_CATEGORIES } from "@/features/geodata/lib/category-icons";
-import type { Dataset, DatasetGeometryKind } from "@/features/geodata/types";
+import type { Dataset, DatasetGeometryKind, TabularPreview } from "@/features/geodata/types";
 import { useMapStore } from "@/features/map/store";
 import { cn } from "@/lib/utils";
+
+const TABULAR_EXTENSIONS = [".csv", ".xlsx"];
+
+function isTabularFile(file: File): boolean {
+  return TABULAR_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext));
+}
+
+function guessField(columns: string[], pattern: RegExp): string {
+  return columns.find((column) => pattern.test(column)) ?? columns[0] ?? "";
+}
 
 const KIND_ICONS: Record<DatasetGeometryKind, typeof RouteIcon> = {
   track: RouteIcon,
@@ -244,6 +256,191 @@ function CategorizedUploadForm({
   );
 }
 
+function TabularColumnMappingFields({
+  preview,
+  latField,
+  setLatField,
+  lonField,
+  setLonField,
+}: {
+  preview: TabularPreview;
+  latField: string;
+  setLatField: (value: string) => void;
+  lonField: string;
+  setLonField: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-input bg-muted/20 p-2.5">
+      <p className="text-[11px] text-muted-foreground">
+        {preview.rowCount} rows, {preview.columns.length} columns detected. Choose the latitude/longitude columns.
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-muted-foreground">Latitude column</span>
+          <Select value={latField} onValueChange={(value) => setLatField(value ?? "")}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select column" />
+            </SelectTrigger>
+            <SelectContent>
+              {preview.columns.map((column) => (
+                <SelectItem key={column} value={column}>
+                  {column}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-muted-foreground">Longitude column</span>
+          <Select value={lonField} onValueChange={(value) => setLonField(value ?? "")}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select column" />
+            </SelectTrigger>
+            <SelectContent>
+              {preview.columns.map((column) => (
+                <SelectItem key={column} value={column}>
+                  {column}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      {preview.sampleRows.length > 0 && (
+        <div className="max-h-24 overflow-auto rounded-sm border border-border">
+          <table className="w-full border-collapse text-left text-[10px]">
+            <thead>
+              <tr>
+                {preview.columns.map((column) => (
+                  <th key={column} className="border-b border-border px-1.5 py-1 font-mono text-muted-foreground">
+                    {column}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {preview.sampleRows.slice(0, 5).map((row, index) => (
+                <tr key={index}>
+                  {preview.columns.map((column) => (
+                    <td key={column} className="truncate px-1.5 py-1">
+                      {String(row[column] ?? "")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PointUploadForm() {
+  const [name, setName] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [categoryMode, setCategoryMode] = useState<"field" | "single">("field");
+  const [typeField, setTypeField] = useState("type");
+  const [defaultType, setDefaultType] = useState("");
+  const [latField, setLatField] = useState("");
+  const [lonField, setLonField] = useState("");
+
+  const upload = useUploadPointDataset();
+  const preview = usePreviewTabularPoints();
+  const tabular = file && isTabularFile(file);
+
+  const handleSelectFile = (next: File | null) => {
+    setFile(next);
+    preview.reset();
+    setLatField("");
+    setLonField("");
+    if (next && isTabularFile(next)) {
+      preview.mutate(next, {
+        onSuccess: (result) => {
+          setLatField(guessField(result.columns, /^(lat|latitude)$/i));
+          setLonField(guessField(result.columns, /^(lon|lng|longitude)$/i));
+        },
+      });
+    }
+  };
+
+  const handleUpload = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file || !name.trim()) return;
+    const categorySource: CategorySource =
+      categoryMode === "field" ? { typeField: typeField.trim() || "type" } : { defaultType: defaultType.trim() };
+    if (categoryMode === "single" && !("defaultType" in categorySource && categorySource.defaultType)) return;
+    if (tabular && (!latField || !lonField)) return;
+
+    upload.mutate(
+      {
+        name: name.trim(),
+        file,
+        categorySource,
+        latLonFields: tabular ? { latField, lonField } : undefined,
+      },
+      {
+        onSuccess: () => {
+          setName("");
+          setFile(null);
+          setDefaultType("");
+          setLatField("");
+          setLonField("");
+        },
+      },
+    );
+  };
+
+  const canSubmit = Boolean(
+    name.trim() &&
+      file &&
+      (categoryMode === "field" || defaultType.trim()) &&
+      (!tabular || (latField && lonField)) &&
+      !preview.isPending,
+  );
+
+  return (
+    <form className="flex flex-col gap-2" onSubmit={handleUpload}>
+      <SectionLabel>Upload point data</SectionLabel>
+      <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Dataset name" />
+      <FileDropzone
+        file={file}
+        onSelect={handleSelectFile}
+        accept={POINT_UPLOAD_ACCEPT}
+        placeholder="Drop a GeoJSON, CSV, or Excel file, or click to browse"
+      />
+      {preview.isPending && <p className="text-[11px] text-muted-foreground">Reading columns...</p>}
+      {preview.isError && (
+        <p className="text-xs text-destructive">Couldn&apos;t read that file — check it&apos;s a valid CSV or Excel file.</p>
+      )}
+      {tabular && preview.data && (
+        <TabularColumnMappingFields
+          preview={preview.data}
+          latField={latField}
+          setLatField={setLatField}
+          lonField={lonField}
+          setLonField={setLonField}
+        />
+      )}
+      <CategoryUploadFields
+        categoryMode={categoryMode}
+        setCategoryMode={setCategoryMode}
+        typeField={typeField}
+        setTypeField={setTypeField}
+        defaultType={defaultType}
+        setDefaultType={setDefaultType}
+      />
+      <Button type="submit" disabled={upload.isPending || !canSubmit}>
+        <Upload className="size-3.5" />
+        Upload
+      </Button>
+      {upload.isError && (
+        <p className="text-xs text-destructive">Upload failed — check the file and column/category settings.</p>
+      )}
+    </form>
+  );
+}
+
 function DatasetTableDialog({ dataset }: { dataset: Dataset }) {
   const [open, setOpen] = useState(false);
   const { data: detail } = useDatasetDetail(dataset.id, open);
@@ -348,7 +545,6 @@ function DatasetList() {
 }
 
 export function GeodataPanel() {
-  const uploadPointDataset = useUploadPointDataset();
   const uploadPolygonDataset = useUploadPolygonDataset();
 
   return (
@@ -376,7 +572,7 @@ export function GeodataPanel() {
               <TrackUploadForm />
             </TabsContent>
             <TabsContent value="points" className="mt-4">
-              <CategorizedUploadForm label="Upload point data" upload={uploadPointDataset} />
+              <PointUploadForm />
             </TabsContent>
             <TabsContent value="polygons" className="mt-4">
               <CategorizedUploadForm label="Upload polygon data" upload={uploadPolygonDataset} />

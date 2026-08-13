@@ -11,58 +11,14 @@ from shapely.geometry import Point as ShapelyPoint, Polygon, shape
 from shapely.geometry.base import BaseGeometry
 
 from shadowbot.datastores.networkx.config import NetworkXRoutingConfig
+from shadowbot.datastores.networkx.osm_tags import TagEntry, infer_category, merged_tags, tag_entries
 from shadowbot.integrations.overpass import OverpassClient
-from shadowbot.schemas.poi import NearbyPoiRequest, OsmTag, Poi, PoiCategory, RoutePoiRequest
+from shadowbot.schemas.poi import NearbyPoiRequest, Poi, RoutePoiRequest
 from shadowbot.schemas.routing import Route
 
 # Good enough for a single-region prototype without a projected-CRS round trip —
 # matches the same tradeoff NetworkXRoutingRepository makes for its reroute buffer.
 _METERS_PER_DEGREE = 111_320
-
-# Each category maps to exactly one (osm_key, osm_value) pair — kept single-valued so
-# a result row can be matched back to the category that found it (see _infer_category).
-_CATEGORY_TAGS: dict[PoiCategory, tuple[str, str]] = {
-    PoiCategory.GAS_STATION: ("amenity", "fuel"),
-    PoiCategory.EV_CHARGING: ("amenity", "charging_station"),
-    PoiCategory.SUPERMARKET: ("shop", "supermarket"),
-    PoiCategory.RESTAURANT: ("amenity", "restaurant"),
-    PoiCategory.COFFEE: ("amenity", "cafe"),
-    PoiCategory.PARKING: ("amenity", "parking"),
-    PoiCategory.REST_AREA: ("highway", "rest_area"),
-    PoiCategory.HOTEL: ("tourism", "hotel"),
-    PoiCategory.PHARMACY: ("amenity", "pharmacy"),
-    PoiCategory.HOSPITAL: ("amenity", "hospital"),
-    PoiCategory.PARK: ("leisure", "park"),
-    PoiCategory.BANK: ("amenity", "bank"),
-    PoiCategory.ATM: ("amenity", "atm"),
-    PoiCategory.CAR_REPAIR: ("shop", "car_repair"),
-    PoiCategory.CAMPGROUND: ("tourism", "camp_site"),
-}
-
-# (osm_key, osm_value, result label) triples — curated categories label themselves,
-# raw tags label as "key=value" since there's no PoiCategory to attach to the result.
-_TagEntry = tuple[str, str, PoiCategory | str]
-
-
-def _tag_entries(categories: list[PoiCategory], raw_tags: list[OsmTag]) -> list[_TagEntry]:
-    entries: list[_TagEntry] = [(*_CATEGORY_TAGS[category], category) for category in categories]
-    entries += [(tag.key, tag.value, f"{tag.key}={tag.value}") for tag in raw_tags]
-    return entries
-
-
-def _merged_tags(entries: list[_TagEntry]) -> dict[str, bool | str | list[str]]:
-    """Combine every tag entry into one Overpass query, OR-ing same-key values."""
-    merged: dict[str, list[str]] = {}
-    for key, value, _label in entries:
-        merged.setdefault(key, []).append(value)
-    return {key: values[0] if len(values) == 1 else values for key, values in merged.items()}
-
-
-def _infer_category(row: pd.Series, entries: list[_TagEntry]) -> PoiCategory | str:
-    for key, value, label in entries:
-        if row.get(key) == value:
-            return label
-    return entries[0][2]
 
 
 class PoiRepository:
@@ -83,7 +39,7 @@ class PoiRepository:
     def _find_near_point_sync(self, request: NearbyPoiRequest) -> list[Poi]:
         lon, lat = request.origin.coordinates[:2]
         search_area = ShapelyPoint(lon, lat).buffer(request.radius_m / _METERS_PER_DEGREE)
-        entries = _tag_entries(request.categories, request.raw_tags)
+        entries = tag_entries(request.categories, request.raw_tags)
         features = self._query_features(search_area, entries)
         return self._rank(
             features,
@@ -96,7 +52,7 @@ class PoiRepository:
     def _find_along_route_sync(self, route: Route, request: RoutePoiRequest) -> list[Poi]:
         route_line = shape(route.geometry.model_dump(mode="json"))
         corridor = route_line.buffer(request.corridor_m / _METERS_PER_DEGREE)
-        entries = _tag_entries(request.categories, request.raw_tags)
+        entries = tag_entries(request.categories, request.raw_tags)
         features = self._query_features(corridor, entries)
         return self._rank(
             features,
@@ -106,9 +62,9 @@ class PoiRepository:
             limit=request.limit,
         )
 
-    def _query_features(self, search_area: BaseGeometry, entries: list[_TagEntry]) -> pd.DataFrame:
+    def _query_features(self, search_area: BaseGeometry, entries: list[TagEntry]) -> pd.DataFrame:
         """Query POI tags within search_area via Overpass."""
-        tags = _merged_tags(entries)
+        tags = merged_tags(entries)
         # .buffer() on a Point/LineString always yields a Polygon, never Multi* — shapely's
         # return type is the broader BaseGeometry since that's true of buffer() in general.
         polygon = cast(Polygon, search_area)
@@ -118,7 +74,7 @@ class PoiRepository:
         self,
         features: pd.DataFrame,
         reference_geom: BaseGeometry,
-        entries: list[_TagEntry],
+        entries: list[TagEntry],
         name_query: str | None,
         limit: int,
     ) -> list[Poi]:
@@ -142,7 +98,7 @@ class PoiRepository:
             pois.append(
                 Poi(
                     name=name if isinstance(name, str) else None,
-                    category=_infer_category(row, entries),
+                    category=infer_category(row, entries),
                     geometry=Point(
                         type="Point", coordinates=Position2D(longitude=float(centroid.x), latitude=float(centroid.y))
                     ),

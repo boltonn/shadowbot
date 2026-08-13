@@ -9,8 +9,8 @@ from shadowbot.agent.tools import (
     estimate_arrival,
     find_frequented_locations,
     find_nearby_poi,
-    find_point_dataset_along_route,
     find_poi_along_route,
+    find_point_dataset_along_route,
     geocode,
     get_isochrone,
     get_track,
@@ -20,6 +20,8 @@ from shadowbot.agent.tools import (
     match_track,
     plan_route,
     reroute,
+    save_location_label,
+    search_routes,
 )
 
 SYSTEM_PROMPT = (
@@ -53,13 +55,27 @@ SYSTEM_PROMPT = (
     "expect real-time accuracy. Use get_isochrone for open-ended 'what's within N minutes' questions "
     "rather than routing to one destination at a time. Use find_frequented_locations when asked about "
     "someone's habits or routine rather than reasoning over one track's raw points yourself — it already "
-    "separates real visits from passing through. Use match_track to snap a track's raw GPS points onto "
+    "separates real visits from passing through. Its home/work guess assumes a typical daytime schedule; "
+    "if the person describes something else (night shift, remote work, etc.), adjust its request's "
+    "classification field's time windows rather than trusting a guess that doesn't fit. Whenever the "
+    "person corrects, disagrees with, or names a frequented location (e.g. 'that's the gym'), you must "
+    "call save_location_label in that same turn with that location's exact geometry from the prior "
+    "result — replying in text alone ('noted', 'I'll remember that') persists nothing, and the next "
+    "lookup will repeat the same wrong guess. Use match_track to snap a track's raw GPS points onto "
     "the actual roads it drove before reasoning about which route or roads it took; it may be unavailable "
     "depending on backend configuration, in which case say so rather than guessing from raw points. "
     "For questions about a category not in your OSM POI list (e.g. 'how many camera lights do I pass "
     "on this route'), use list_point_datasets to find the right uploaded dataset, then "
     "find_point_dataset_along_route with that route's id — don't say this is unsupported without "
-    "checking whether the user has uploaded relevant data first."
+    "checking whether the user has uploaded relevant data first. When someone describes constraints "
+    "a single planned route can't satisfy directly — a travel mode, one or more named places/roads "
+    "to avoid, and/or passing through an area feature (a park, lake, mall, etc.) of at least a given "
+    "size and/or with more than one boundary crossing ('exit') — use search_routes rather than "
+    "plan_route; it generates several candidates and returns only the ones meeting every criterion, "
+    "and each returned route is already planned so it can be passed straight to reroute/"
+    "compare_routes/estimate_arrival. Use its through_raw_tags the same way you'd use find_nearby_poi's "
+    "raw_tags for anything outside the curated category list — don't refuse a feature type just "
+    "because it isn't park. If nothing matches, say so rather than silently dropping a criterion."
 )
 
 
@@ -70,6 +86,7 @@ def build_agent(llm_settings: LLMSettings) -> Agent[AgentDeps, str]:
     )
     agent.tool(geocode)
     agent.tool(plan_route)
+    agent.tool(search_routes)
     agent.tool(reroute)
     agent.tool(compare_routes)
     agent.tool(estimate_arrival)
@@ -83,4 +100,5 @@ def build_agent(llm_settings: LLMSettings) -> Agent[AgentDeps, str]:
     agent.tool(list_point_datasets)
     agent.tool(find_point_dataset_along_route)
     agent.tool(list_polygon_datasets)
+    agent.tool(save_location_label)
     return agent

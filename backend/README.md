@@ -12,6 +12,60 @@ docker compose up -d postgres
 Matches the `POSTGRES__*` defaults in `.env.example` (port 5433, db/user/password
 `shadowbot`). Data persists in the `postgres_data` volume across restarts.
 
+## Geodata: datasets, points, tracks, and polygons
+
+A "dataset" isn't its own table — it's a virtual concept spanning three
+independent geometry kinds, each with its own Postgres table pair (parent +
+feature) and its own repository:
+
+| Geometry kind | Dataset table    | Feature table            | Feature shape                                               |
+| -------------- | ----------------- | -------------------------- | -------------------------------------------------------------- |
+| `point`        | `point_dataset`   | `point_dataset_feature`   | `Point` + `category`/`name`/`tags`                              |
+| `polygon`      | `polygon_dataset` | `polygon_dataset_feature` | `Polygon` + `category`/`name`/`tags`                            |
+| `track`        | `track`           | `track_point`             | `Point` + `date_recorded`/`elevation_m`/`speed_mps`/`tags`     |
+
+Point and polygon features are hand-labeled or uploaded points of interest — a
+camera, a restricted zone, a POI — so they carry a user-facing `category` and
+`name`. Track points are raw GPS telemetry ordered in time (no category):
+they represent where a device actually went, and a track's
+`date_start`/`date_end` are derived from `min`/`max(date_recorded)` across its
+points rather than set directly.
+
+`DatasetGeometryKind` (`point` | `track` | `polygon`, in `schemas/common.py`)
+tags which kind a dataset is. `schemas/dataset.py` defines the surface that
+unifies all three for browsing:
+
+- `Dataset` — a geometry-kind-agnostic summary (id, name, feature_count,
+  categories, tags, date_created, plus track-only date_start/date_end)
+- `DatasetDetail = PointDatasetDetail | TrackDetail | PolygonDatasetDetail` —
+  a union covering each kind's full detail (dataset metadata + its features)
+
+`PostgresDatasetRepository` (`datastores/postgres/repositories/dataset.py`)
+is a facade, not a table-backed repository — it wraps the three real
+repositories (`points`, `tracks`, `polygons`) so callers have one place to
+browse across geometry kinds:
+
+- `list_datasets` runs a `UNION ALL` across all three tables to page through
+  every dataset regardless of kind
+- `get_dataset_detail(id)` tries each geometry kind's repository in turn
+  (point → track → polygon) until one recognizes the id
+- `download_dataset(id)` serializes any dataset's features to a GeoJSON
+  `FeatureCollection`
+
+API-wise, `GET /geodata/datasets`, `GET /geodata/datasets/{id}`, and
+`GET /geodata/datasets/{id}/download` are the unified read surface. Writes —
+upload, labeling, bulk tagging — go through kind-specific endpoints instead
+(e.g. `POST /geodata/datasets/points/upload`,
+`PATCH /geodata/datasets/tracks/{id}/features/{feature_id}`), since each
+kind's create payload and label rules differ — track points, for instance,
+have no category to label.
+
+Track history feeds a separate analytics layer: `FrequentedLocation`
+(`schemas/track.py`) clusters a track's dwell periods into places visited
+more than once, and `LocationLabel` (`schemas/location_label.py`) stores a
+person's correction/name for one of those inferred places. Both are derived
+from track datasets, not datasets themselves.
+
 ## Local LLM
 
 The agent can run against a locally-hosted model instead of a hosted provider, via an

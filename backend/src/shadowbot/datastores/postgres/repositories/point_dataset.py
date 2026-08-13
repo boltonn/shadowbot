@@ -47,6 +47,7 @@ class PostgresPointDatasetRepository:
                 category=point.category,
                 name=point.name,
                 tags=point.tags,
+                properties=point.properties,
             )
             for point in dataset.points
         ]
@@ -72,6 +73,7 @@ class PostgresPointDatasetRepository:
                 category=p.category,
                 name=p.name,
                 tags=p.tags,
+                properties=p.properties,
             )
             for p in points_result.scalars().all()
         ]
@@ -161,6 +163,7 @@ class PostgresPointDatasetRepository:
             category=feature.category,
             name=feature.name,
             tags=feature.tags,
+            properties=feature.properties,
         )
 
     async def bulk_tag_features(self, dataset_id: str, request: BulkTagRequest) -> list[PointFeature]:
@@ -183,6 +186,7 @@ class PostgresPointDatasetRepository:
                 category=f.category,
                 name=f.name,
                 tags=f.tags,
+                properties=f.properties,
             )
             for f in features
         ]

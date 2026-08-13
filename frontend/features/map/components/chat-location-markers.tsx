@@ -4,10 +4,12 @@ import { useEffect } from "react";
 import {
   Banknote,
   BatteryCharging,
+  Briefcase,
   CircleDot,
   Coffee,
   Fuel,
   History,
+  Home,
   Hospital,
   Hotel,
   Landmark,
@@ -32,6 +34,8 @@ import type { ChatLocationKind } from "@/features/map/types";
 const ICONS: Partial<Record<ChatLocationKind, LucideIcon>> = {
   geocode: MapPin,
   frequented: History,
+  home: Home,
+  work: Briefcase,
   gas_station: Fuel,
   ev_charging: BatteryCharging,
   supermarket: ShoppingCart,

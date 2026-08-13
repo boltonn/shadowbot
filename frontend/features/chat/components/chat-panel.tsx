@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import Image from "next/image";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
@@ -16,6 +16,7 @@ import { useAgentConfig } from "@/features/chat/hooks/use-agent-config";
 import { useApiKey } from "@/features/chat/hooks/use-api-key";
 import { useSyncChatLocationsToMap } from "@/features/chat/hooks/use-sync-chat-locations";
 import { useSyncChatRouteToMap } from "@/features/chat/hooks/use-sync-chat-route";
+import { useSyncChatSearchRoutesToMap } from "@/features/chat/hooks/use-sync-chat-search-routes";
 import {
   Conversation,
   ConversationContent,
@@ -31,15 +32,14 @@ function isAuthError(message: string) {
 }
 
 export function ChatPanel() {
-  const sessionIdRef = useRef<string>(
-    typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36),
-  );
+  const [sessionId] = useState(() => crypto.randomUUID());
   const [input, setInput] = useState("");
   const [showTrace, setShowTrace] = useState(true);
   const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false);
   const { apiKey, setApiKey } = useApiKey();
   const { data: agentConfig } = useAgentConfig();
-  const hasPromptedForKeyRef = useRef(false);
+  const [hasPromptedForKey, setHasPromptedForKey] = useState(false);
+  const [lastHandledError, setLastHandledError] = useState<Error | undefined>(undefined);
 
   const transport = useMemo(
     () =>
@@ -53,11 +53,11 @@ export function ChatPanel() {
               .map((part) => part.text)
               .join("") ?? "";
           return {
-            body: { message: text, sessionId: sessionIdRef.current, apiKey: apiKey || undefined },
+            body: { message: text, sessionId, apiKey: apiKey || undefined },
           };
         },
       }),
-    [apiKey],
+    [apiKey, sessionId],
   );
 
   const { messages, sendMessage, status, error, clearError, addToolApprovalResponse } = useChat({
@@ -65,6 +65,7 @@ export function ChatPanel() {
   });
   useSyncChatLocationsToMap(messages);
   useSyncChatRouteToMap(messages);
+  useSyncChatSearchRoutesToMap(messages);
 
   const isBusy = status === "submitted" || status === "streaming";
   const lastMessage = messages[messages.length - 1];
@@ -82,21 +83,21 @@ export function ChatPanel() {
     setInput("");
   };
 
-  useEffect(() => {
+  // Adjusting state in response to a prop/hook-state change, computed during render rather
+  // than in an Effect — see https://react.dev/learn/you-might-not-need-an-effect.
+  if (error !== lastHandledError) {
+    setLastHandledError(error);
     if (error && isAuthError(error.message)) {
       setApiKeyDialogOpen(true);
     }
-  }, [error]);
+  }
 
   // Prompt for a key up front (once) rather than waiting for the first request to fail,
   // if the server has no key of its own configured and the user hasn't supplied one.
-  useEffect(() => {
-    if (hasPromptedForKeyRef.current || !agentConfig || apiKey) return;
-    if (!agentConfig.hasServerKey) {
-      hasPromptedForKeyRef.current = true;
-      setApiKeyDialogOpen(true);
-    }
-  }, [agentConfig, apiKey]);
+  if (!hasPromptedForKey && agentConfig && !apiKey && !agentConfig.hasServerKey) {
+    setHasPromptedForKey(true);
+    setApiKeyDialogOpen(true);
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

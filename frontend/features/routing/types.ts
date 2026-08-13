@@ -35,6 +35,14 @@ export type RouteLeg = Defined<Omit<components["schemas"]["RouteLeg"], "origin" 
   geometry: LineString;
 };
 
+export type RerouteRequest = Omit<components["schemas"]["RerouteRequest"], "avoid" | "waypoints"> & {
+  avoid: AvoidancePreferences;
+  waypoints?: Point[] | null;
+};
+
+export type ArrivalEstimateRequest = components["schemas"]["ArrivalEstimateRequest"];
+export type ArrivalEstimate = Defined<components["schemas"]["ArrivalEstimate"]>;
+
 export type Route = Defined<
   Omit<
     components["schemas"]["Route"],
@@ -48,4 +56,25 @@ export type Route = Defined<
   avoid: AvoidancePreferences;
   legs: RouteLeg[];
   alternates: RouteAlternate[];
+};
+
+export type PoiCategory = components["schemas"]["PoiCategory"];
+export type OsmTag = components["schemas"]["OsmTag"];
+
+export type AreaMatch = Defined<Omit<components["schemas"]["AreaMatch"], "geometry">> & {
+  geometry: Polygon;
+};
+
+export type RouteSearchCriteria = Omit<
+  components["schemas"]["RouteSearchCriteria"],
+  "origin" | "destination" | "avoid"
+> & {
+  origin: Point;
+  destination: Point;
+  avoid?: AvoidancePreferences;
+};
+
+export type RouteSearchMatch = Defined<Omit<components["schemas"]["RouteSearchMatch"], "route" | "matchedArea">> & {
+  route: Route;
+  matchedArea: AreaMatch | null;
 };

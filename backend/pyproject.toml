@@ -2,9 +2,6 @@
 name = "shadowbot"
 version = "0.1.0"
 description = "Offline-first geolocation triage, routing, and tracking service"
-authors = [
-    { name = "boltonn", email = "nazgul44@protonmail.com" }
-]
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.18.5",
@@ -15,6 +12,7 @@ dependencies = [
     "httpx>=0.28.1",
     "loguru>=0.7.3",
     "networkx>=3.6.1",
+    "openpyxl>=3.1.5",
     "osmnx>=2.1.1",
     "pydantic>=2.13.4",
     "pydantic-ai>=2.22.0",
