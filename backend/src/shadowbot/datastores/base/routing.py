@@ -104,7 +104,7 @@ class RoutingRepository(ABC):
         new_request = RouteRequest(
             origin=route.origin,
             destination=route.destination,
-            waypoints=route.waypoints,
+            waypoints=request.waypoints if request.waypoints is not None else route.waypoints,
             network_type=route.network_type,
             avoid=avoid,
         )

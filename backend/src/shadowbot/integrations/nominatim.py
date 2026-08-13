@@ -1,6 +1,7 @@
 """Async client for the public/self-hosted Nominatim geocoding API."""
 
 import re
+from pathlib import Path
 
 import httpx
 from geojson_pydantic import Point
@@ -35,13 +36,20 @@ def _house_number_fallback(query: str) -> str | None:
     return f"{street}, {zip_match.group(0)}" if zip_match else street
 
 
-class GeocodingConfig(BaseModel):
+class NominatimConfig(BaseModel):
     """Nominatim connection configuration."""
 
     nominatim_url: str = Field(default="https://nominatim.openstreetmap.org")
     user_agent: str = Field(
         default="shadowbot/0.1",
         description="Required by Nominatim's usage policy — identify your deployment",
+    )
+    cert: Path | tuple[Path, Path] | None = Field(
+        default=None,
+        description="Client cert for mTLS to a self-hosted instance: a single file, or a (cert, key) pair",
+    )
+    verify: bool | Path = Field(
+        default=True, description="CA bundle path to verify against, or False to disable verification"
     )
 
     model_config = {"frozen": True}
@@ -50,7 +58,7 @@ class GeocodingConfig(BaseModel):
 class NominatimClient:
     """Thin async wrapper around a Nominatim /search endpoint."""
 
-    def __init__(self, config: GeocodingConfig):
+    def __init__(self, config: NominatimConfig):
         self.config = config
 
     async def geocode(self, request: GeocodeRequest) -> list[GeocodeResult]:
@@ -68,7 +76,11 @@ class NominatimClient:
         return await self._search(fallback_query, request.limit)
 
     async def _search(self, query: str, limit: int) -> list[GeocodeResult]:
-        async with httpx.AsyncClient(headers={"User-Agent": self.config.user_agent}) as client:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": self.config.user_agent},
+            cert=self._httpx_cert(),
+            verify=self._httpx_verify(),
+        ) as client:
             response = await client.get(
                 f"{self.config.nominatim_url.rstrip('/')}/search",
                 params={"q": query, "format": "jsonv2", "limit": limit},
@@ -87,3 +99,14 @@ class NominatimClient:
             )
             for result in results
         ]
+
+    def _httpx_cert(self) -> str | tuple[str, str] | None:
+        if self.config.cert is None:
+            return None
+        if isinstance(self.config.cert, Path):
+            return str(self.config.cert)
+        cert, key = self.config.cert
+        return str(cert), str(key)
+
+    def _httpx_verify(self) -> bool | str:
+        return self.config.verify if isinstance(self.config.verify, bool) else str(self.config.verify)

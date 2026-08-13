@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from shadowbot.api.deps.overpass import get_overpass_client
 from shadowbot.api.settings import Settings
 from shadowbot.datastores.base.routing import RoutingRepository
 from shadowbot.datastores.networkx.repository import NetworkXRoutingRepository
@@ -31,7 +32,7 @@ def get_routing_repository() -> RoutingRepository:
                 "run `uv sync --extra valhalla`."
             ) from exc
         return ValhallaRoutingRepository(config=settings.valhalla)
-    return NetworkXRoutingRepository(config=settings.routing)
+    return NetworkXRoutingRepository(config=settings.routing, overpass_client=get_overpass_client())
 
 
 RoutingDatastoreDep = Annotated[RoutingRepository, Depends(get_routing_repository)]

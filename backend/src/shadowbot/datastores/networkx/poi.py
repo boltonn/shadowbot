@@ -1,15 +1,17 @@
-"""POI search via Overpass tag queries, layered on the road-network cache's osmnx config."""
+"""POI search via Overpass tag queries, using the shared OverpassClient for fetching."""
 
 import asyncio
+from typing import cast
 
 import osmnx as ox
 import pandas as pd
 from geojson_pydantic import Point
-from shapely.geometry import Point as ShapelyPoint, shape
+from geojson_pydantic.types import Position2D
+from shapely.geometry import Point as ShapelyPoint, Polygon, shape
 from shapely.geometry.base import BaseGeometry
 
 from shadowbot.datastores.networkx.config import NetworkXRoutingConfig
-from shadowbot.integrations.overpass import call_with_retry
+from shadowbot.integrations.overpass import OverpassClient
 from shadowbot.schemas.poi import NearbyPoiRequest, OsmTag, Poi, PoiCategory, RoutePoiRequest
 from shadowbot.schemas.routing import Route
 
@@ -66,8 +68,9 @@ def _infer_category(row: pd.Series, entries: list[_TagEntry]) -> PoiCategory | s
 class PoiRepository:
     """Finds points of interest near a location or along a route via Overpass tag search."""
 
-    def __init__(self, config: NetworkXRoutingConfig):
+    def __init__(self, config: NetworkXRoutingConfig, overpass_client: OverpassClient):
         self.config = config
+        self.overpass_client = overpass_client
 
     async def find_near_point(self, request: NearbyPoiRequest) -> list[Poi]:
         """Find the nearest POIs of one or more categories within a radius of a point."""
@@ -106,9 +109,10 @@ class PoiRepository:
     def _query_features(self, search_area: BaseGeometry, entries: list[_TagEntry]) -> pd.DataFrame:
         """Query POI tags within search_area via Overpass."""
         tags = _merged_tags(entries)
-        return call_with_retry(
-            overpass_url=self.config.overpass_url, fetch=lambda: ox.features_from_polygon(search_area, tags=tags)
-        )
+        # .buffer() on a Point/LineString always yields a Polygon, never Multi* — shapely's
+        # return type is the broader BaseGeometry since that's true of buffer() in general.
+        polygon = cast(Polygon, search_area)
+        return self.overpass_client.call_with_retry(fetch=lambda: ox.features_from_polygon(polygon, tags=tags))
 
     def _rank(
         self,
@@ -126,7 +130,7 @@ class PoiRepository:
             matches = name.astype(str).str.contains(name_query, case=False, na=False) | brand.astype(
                 str
             ).str.contains(name_query, case=False, na=False)
-            features = features[matches]
+            features = cast(pd.DataFrame, features[matches])
             if features.empty:
                 return []
 
@@ -139,7 +143,9 @@ class PoiRepository:
                 Poi(
                     name=name if isinstance(name, str) else None,
                     category=_infer_category(row, entries),
-                    geometry=Point(type="Point", coordinates=(centroid.x, centroid.y)),
+                    geometry=Point(
+                        type="Point", coordinates=Position2D(longitude=float(centroid.x), latitude=float(centroid.y))
+                    ),
                     distance_m=distance_m,
                 )
             )

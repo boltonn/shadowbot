@@ -888,7 +888,7 @@ export interface components {
         ];
         /**
          * RerouteRequest
-         * @description A request to recompute a prior route with additional avoidance constraints.
+         * @description A request to recompute a prior route, optionally with a new ordered stop list.
          */
         RerouteRequest: {
             avoid: components["schemas"]["AvoidancePreferences"];
@@ -898,6 +898,11 @@ export interface components {
              * @default false
              */
             avoidPriorRoute: boolean;
+            /**
+             * Waypoints
+             * @description Full replacement ordered list of intermediate stops. Omit to keep the prior route's waypoints unchanged; pass the prior list plus/minus a stop, in the desired order, to add or remove one (e.g. 'add a stop at the gas station').
+             */
+            waypoints?: components["schemas"]["Point"][] | null;
         };
         /**
          * Route

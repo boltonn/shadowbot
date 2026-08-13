@@ -18,7 +18,7 @@ from geojson_pydantic import Point
 from loguru import logger
 
 from shadowbot.datastores.networkx.config import NetworkXRoutingConfig
-from shadowbot.integrations.overpass import call_with_retry
+from shadowbot.integrations.overpass import OverpassClient
 
 _METERS_PER_DEGREE = 111_320
 _TILE_DEGREES = 0.1  # ~11km grid — requests within the same tile reuse one cached fetch
@@ -72,7 +72,10 @@ def _finalize_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
 
 @lru_cache(maxsize=64)
 def _get_graph_for_bbox(
-    config: NetworkXRoutingConfig, bbox: tuple[float, float, float, float], network_type: str
+    config: NetworkXRoutingConfig,
+    overpass_client: OverpassClient,
+    bbox: tuple[float, float, float, float],
+    network_type: str,
 ) -> nx.MultiDiGraph:
     config.cache_dir.mkdir(parents=True, exist_ok=True)
     graph_path = config.cache_dir / f"{_bbox_slug(bbox, network_type)}.graphml"
@@ -82,12 +85,10 @@ def _get_graph_for_bbox(
         return ox.load_graphml(graph_path)
 
     logger.info(
-        f"Fetching OSM graph tile {bbox} ({network_type}) via Overpass ({config.overpass_url}) "
-        "— first request in this area, may take a moment"
+        f"Fetching OSM graph tile {bbox} ({network_type}) via Overpass "
+        f"({overpass_client.config.overpass_url}) — first request in this area, may take a moment"
     )
-    graph = call_with_retry(
-        overpass_url=config.overpass_url, fetch=lambda: ox.graph_from_bbox(bbox, network_type=network_type)
-    )
+    graph = overpass_client.call_with_retry(fetch=lambda: ox.graph_from_bbox(bbox, network_type=network_type))
     graph = _finalize_graph(graph)
     ox.save_graphml(graph, graph_path)
     logger.info(f"Cached OSM graph tile to {graph_path}")
@@ -95,8 +96,12 @@ def _get_graph_for_bbox(
 
 
 def get_graph_for_points(
-    config: NetworkXRoutingConfig, points: list[Point], network_type: str, buffer_m: float = 3_000
+    config: NetworkXRoutingConfig,
+    overpass_client: OverpassClient,
+    points: list[Point],
+    network_type: str,
+    buffer_m: float = 3_000,
 ) -> nx.MultiDiGraph:
     """Return a road network graph covering the given points, fetching only the area actually needed."""
     bbox = _bbox_for(points, buffer_m)
-    return _get_graph_for_bbox(config, bbox, network_type)
+    return _get_graph_for_bbox(config, overpass_client, bbox, network_type)

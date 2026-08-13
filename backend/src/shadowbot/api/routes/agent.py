@@ -99,7 +99,7 @@ def get_agent_config() -> AgentConfig:
 
 @lru_cache(maxsize=1)
 def get_nominatim_client() -> NominatimClient:
-    return NominatimClient(config=settings.geocoding)
+    return NominatimClient(config=settings.nominatim)
 
 
 class _UIMessageStreamTranslator:

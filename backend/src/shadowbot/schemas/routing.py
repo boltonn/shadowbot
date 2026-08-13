@@ -70,12 +70,20 @@ class RouteRequest(CamelModel):
 
 
 class RerouteRequest(CamelModel):
-    """A request to recompute a prior route with additional avoidance constraints."""
+    """A request to recompute a prior route, optionally with a new ordered stop list."""
 
     avoid: AvoidancePreferences
     avoid_prior_route: bool = Field(
         default=False,
         description="Exclude the previously computed route's own path, for 'take a different way'",
+    )
+    waypoints: list[Point] | None = Field(
+        default=None,
+        description=(
+            "Full replacement ordered list of intermediate stops. Omit to keep the prior route's "
+            "waypoints unchanged; pass the prior list plus/minus a stop, in the desired order, to "
+            "add or remove one (e.g. 'add a stop at the gas station')."
+        ),
     )
 
 

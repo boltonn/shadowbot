@@ -8,7 +8,7 @@ from shadowbot.schemas.routing import GeocodeRequest, GeocodeResult, RerouteRequ
 
 router = APIRouter(tags=["routing"])
 settings = Settings()
-nominatim_client = NominatimClient(config=settings.geocoding)
+nominatim_client = NominatimClient(config=settings.nominatim)
 
 
 @router.post("/geocode")

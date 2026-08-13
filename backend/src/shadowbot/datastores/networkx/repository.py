@@ -7,13 +7,14 @@ from uuid import uuid4
 import networkx as nx
 import osmnx as ox
 from geojson_pydantic import LineString, Point, Polygon
-from geojson_pydantic.types import Position
+from geojson_pydantic.types import Position, Position2D
 from shapely import concave_hull
 from shapely.geometry import LineString as ShapelyLineString, MultiPoint, mapping, shape
 
 from shadowbot.datastores.base.routing import RoutingRepository
 from shadowbot.datastores.networkx.config import NetworkXRoutingConfig
 from shadowbot.datastores.networkx.graph_cache import get_graph_for_points
+from shadowbot.integrations.overpass import OverpassClient
 from shadowbot.schemas.routing import (
     AvoidancePreferences,
     Isochrone,
@@ -50,8 +51,9 @@ def _edge_geometry(graph: nx.MultiDiGraph, u: int, v: int, data: dict) -> Shapel
 class NetworkXRoutingRepository(RoutingRepository):
     """Routing backend that computes shortest paths over a locally cached OSM graph."""
 
-    def __init__(self, config: NetworkXRoutingConfig):
+    def __init__(self, config: NetworkXRoutingConfig, overpass_client: OverpassClient):
         self.config = config
+        self.overpass_client = overpass_client
 
     async def compute_route(self, request: RouteRequest) -> Route:
         """Compute a new route between the request's origin and destination."""
@@ -66,7 +68,11 @@ class NetworkXRoutingRepository(RoutingRepository):
         # snapped to the same tile grid as everything else so overlapping requests reuse it.
         isochrone_buffer_m = request.minutes * 60 * _ISOCHRONE_MAX_SPEED_MPS
         graph = get_graph_for_points(
-            self.config, points=[request.origin], network_type=request.network_type, buffer_m=isochrone_buffer_m
+            self.config,
+            self.overpass_client,
+            points=[request.origin],
+            network_type=request.network_type,
+            buffer_m=isochrone_buffer_m,
         )
         weight_fn = self._make_weight_fn(graph, request.avoid)
         lon, lat = request.origin.coordinates[:2]
@@ -94,7 +100,11 @@ class NetworkXRoutingRepository(RoutingRepository):
     def _compute_route_sync(self, request: RouteRequest) -> Route:
         stops = [request.origin, *request.waypoints, request.destination]
         graph = get_graph_for_points(
-            self.config, points=stops, network_type=request.network_type, buffer_m=_ROUTE_GRAPH_BUFFER_M
+            self.config,
+            self.overpass_client,
+            points=stops,
+            network_type=request.network_type,
+            buffer_m=_ROUTE_GRAPH_BUFFER_M,
         )
         weight_fn = self._make_weight_fn(graph, request.avoid)
 
@@ -182,7 +192,7 @@ class NetworkXRoutingRepository(RoutingRepository):
     def _build_geometry(
         self, graph: nx.MultiDiGraph, node_path: list[int]
     ) -> tuple[LineString, float, float]:
-        coords: list[tuple[float, float]] = []
+        coords: list[Position] = []
         distance_m = 0.0
         duration_s = 0.0
 
@@ -191,7 +201,9 @@ class NetworkXRoutingRepository(RoutingRepository):
             distance_m += edge_data.get("length", 0.0)
             duration_s += edge_data.get("travel_time", 0.0)
 
-            segment = list(_edge_geometry(graph, u, v, edge_data).coords)
+            segment: list[Position] = [
+                Position2D(longitude=x, latitude=y) for x, y, *_ in _edge_geometry(graph, u, v, edge_data).coords
+            ]
             if coords and coords[-1] == segment[0]:
                 segment = segment[1:]
             coords.extend(segment)

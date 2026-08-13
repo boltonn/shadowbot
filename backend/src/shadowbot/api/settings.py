@@ -5,7 +5,8 @@ from shadowbot.agent.provider import LLMSettings
 from shadowbot.datastores.networkx.config import NetworkXRoutingConfig
 from shadowbot.datastores.postgres.config import PostgresConfig
 from shadowbot.datastores.valhalla.config import ValhallaRoutingConfig
-from shadowbot.integrations.nominatim import GeocodingConfig
+from shadowbot.integrations.nominatim import NominatimConfig
+from shadowbot.integrations.overpass import OverpassConfig
 
 
 class Settings(BaseSettings):
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     routing: NetworkXRoutingConfig = Field(default_factory=NetworkXRoutingConfig)
     valhalla: ValhallaRoutingConfig = Field(default_factory=ValhallaRoutingConfig)
-    geocoding: GeocodingConfig = Field(default_factory=GeocodingConfig)
+    nominatim: NominatimConfig = Field(default_factory=NominatimConfig)
+    overpass: OverpassConfig = Field(default_factory=OverpassConfig)
 
     model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")

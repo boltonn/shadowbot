@@ -23,13 +23,8 @@ class NetworkXRoutingConfig(BaseModel):
     def _expand_cache_dir(cls, value: Path) -> Path:
         return value.expanduser()
 
-    overpass_url: str = Field(
-        default="https://overpass-api.de/api",
-        description=(
-            "Overpass API base URL osmnx uses to fetch the graph (osmnx appends '/interpreter' "
-            "itself) — point this at a self-hosted instance (see docker-compose.yml's overpass "
-            "service) rather than the public instance, which is frequently overloaded"
-        ),
-    )
-
     model_config = {"frozen": True}
+
+    def __hash__(self) -> int:
+        """Declared explicitly so this type-checks as Hashable for its use as an lru_cache key."""
+        return hash(self.cache_dir)

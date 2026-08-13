@@ -72,7 +72,13 @@ async def plan_route(ctx: RunContext[AgentDeps], request: RouteRequest) -> Route
 
 
 async def reroute(ctx: RunContext[AgentDeps], route_id: str, request: RerouteRequest) -> Route:
-    """Recompute a previously planned route with new avoidance constraints."""
+    """Recompute a previously planned route with new avoidance constraints and/or a new stop list.
+
+    To add or remove a stop on an existing route, geocode the place if needed, then pass
+    request.waypoints as the prior route's waypoints (visible on the earlier Route output)
+    with the stop inserted/removed at the desired position — omit request.waypoints to leave
+    stops unchanged when only adjusting avoidance constraints.
+    """
     prior_route = await ctx.deps.routes.get_route_by_id(route_id)
     if prior_route is None:
         raise ValueError(f"Route not found: {route_id}")

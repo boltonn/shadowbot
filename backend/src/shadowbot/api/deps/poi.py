@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from shadowbot.api.deps.overpass import get_overpass_client
 from shadowbot.api.settings import Settings
 from shadowbot.datastores.networkx.poi import PoiRepository
 
@@ -13,8 +14,8 @@ settings = Settings()
 
 @lru_cache(maxsize=1)
 def get_poi_repository() -> PoiRepository:
-    """Return the configured POI search backend, sharing the road network's Overpass config."""
-    return PoiRepository(config=settings.routing)
+    """Return the configured POI search backend, sharing the road network's Overpass client."""
+    return PoiRepository(config=settings.routing, overpass_client=get_overpass_client())
 
 
 PoiDatastoreDep = Annotated[PoiRepository, Depends(get_poi_repository)]
