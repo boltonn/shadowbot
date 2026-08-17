@@ -166,6 +166,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/routing/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Coverage
+         * @description Which regions, if any, have fast pre-compiled Valhalla routing on this deployment.
+         */
+        get: operations["get_coverage_routing_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/geodata/datasets": {
         parameters: {
             query?: never;
@@ -353,6 +373,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/geodata/datasets/points/{dataset_id}/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Point Feature
+         * @description Add a single feature to an existing point dataset.
+         */
+        post: operations["add_point_feature_geodata_datasets_points__dataset_id__features_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/geodata/datasets/points/{dataset_id}/features/{feature_id}": {
         parameters: {
             query?: never;
@@ -413,6 +453,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/geodata/datasets/polygons/{dataset_id}/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Polygon Feature
+         * @description Add a single feature to an existing polygon dataset.
+         */
+        post: operations["add_polygon_feature_geodata_datasets_polygons__dataset_id__features_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/geodata/datasets/polygons/{dataset_id}/features/{feature_id}": {
         parameters: {
             query?: never;
@@ -462,7 +522,7 @@ export interface paths {
         };
         /**
          * Get Agent Config
-         * @description Whether the frontend can skip prompting for an API key up front.
+         * @description Whether the frontend can skip prompting for an API key up front, and the model picker's options.
          */
         get: operations["get_agent_config_agent_config_get"];
         put?: never;
@@ -507,6 +567,16 @@ export interface components {
              * @description Whether the server can run the agent without a client-supplied API key
              */
             hasServerKey: boolean;
+            /**
+             * Models
+             * @description Selectable models for the chat model picker
+             */
+            models: components["schemas"]["ModelOption"][];
+            /**
+             * Defaultmodelid
+             * @description The model_id used when a chat request omits one
+             */
+            defaultModelId: string;
         };
         /**
          * AreaMatch
@@ -528,6 +598,25 @@ export interface components {
              * @description Distinct points where the road/path network crosses the feature's outer boundary — a heuristic proxy for entrances/exits, since OSM entrance tagging is too inconsistent to rely on directly.
              */
             exitCount: number;
+            /**
+             * Osmtype
+             * @description OSM element type: way or relation (areas are never nodes)
+             */
+            osmType?: string | null;
+            /** Osmid */
+            osmId?: number | null;
+            /**
+             * Rawtags
+             * @description Every OSM tag on the element (name, operator, website, etc.)
+             */
+            rawTags?: {
+                [key: string]: string;
+            };
+            /**
+             * Url
+             * @description Link to the raw element on openstreetmap.org
+             */
+            url?: string | null;
         };
         /**
          * ArrivalEstimate
@@ -669,6 +758,35 @@ export interface components {
              * @description Overrides the server-configured LLM API key for this request
              */
             apiKey?: string | null;
+            /**
+             * Modelid
+             * @description Selects a model from AgentConfig.models; falls back to the server default
+             */
+            modelId?: string | null;
+        };
+        /**
+         * CoverageRegion
+         * @description An area with fast, pre-compiled Valhalla tile coverage.
+         *
+         *     Hand-curated documentation (see scripts/describe_coverage_area.py), not a build
+         *     manifest — an area's bounds don't need to track 1:1 with whatever PBFs are actually
+         *     registered for the tile build at any given moment.
+         */
+        CoverageRegion: {
+            /** Name */
+            name: string;
+            /**
+             * Url
+             * @description Where this area's extract was originally downloaded from
+             */
+            url?: string | null;
+            /** @description Rectangular bounding box of the area's OSM extract */
+            bounds: components["schemas"]["Polygon"];
+            /**
+             * Dateadded
+             * Format: date-time
+             */
+            dateAdded: string;
         };
         /**
          * Dataset
@@ -726,7 +844,8 @@ export interface components {
         };
         /**
          * GeocodeResult
-         * @description A single geocoding match.
+         * @description A single geocoding match, carrying Nominatim's raw OSM identity and address detail
+         *     so a caller can show the underlying element rather than just a name and a pin.
          */
         GeocodeResult: {
             /** Displayname */
@@ -734,6 +853,30 @@ export interface components {
             geometry: components["schemas"]["Point"];
             /** Placetype */
             placeType?: string | null;
+            /**
+             * Osmtype
+             * @description OSM element type: node, way, or relation
+             */
+            osmType?: string | null;
+            /** Osmid */
+            osmId?: number | null;
+            /**
+             * Osmclass
+             * @description Nominatim's category/class field, e.g. 'amenity', 'shop'
+             */
+            osmClass?: string | null;
+            /**
+             * Address
+             * @description Structured address components (house_number, road, city, state, etc.)
+             */
+            address?: {
+                [key: string]: string;
+            };
+            /**
+             * Url
+             * @description Link to the raw element on openstreetmap.org
+             */
+            url?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -778,6 +921,12 @@ export interface components {
             networkType: components["schemas"]["NetworkType"];
             avoid?: components["schemas"]["AvoidancePreferences"];
         };
+        /**
+         * LLMProvider
+         * @description Which pydantic-ai model backend to build.
+         * @enum {string}
+         */
+        LLMProvider: "anthropic" | "google" | "openai_compatible";
         /**
          * LabelFeatureRequest
          * @description Replace a point/polygon feature's category, name, and tags with the given values.
@@ -850,6 +999,22 @@ export interface components {
             dateCreated: string;
         };
         /**
+         * ModelOption
+         * @description A selectable LLM shown in the frontend's model picker.
+         */
+        ModelOption: {
+            /** Id */
+            id: string;
+            provider: components["schemas"]["LLMProvider"];
+            /** Label */
+            label: string;
+            /**
+             * Haskey
+             * @description Whether the server can authenticate this model without a client-supplied key
+             */
+            hasKey: boolean;
+        };
+        /**
          * NetworkType
          * @description osmnx street network filter — what mode of travel the road graph should represent.
          * @enum {string}
@@ -892,7 +1057,7 @@ export interface components {
          *     for it to be added to this enum.
          * @enum {string}
          */
-        PoiCategory: "gas_station" | "ev_charging" | "supermarket" | "restaurant" | "coffee" | "parking" | "rest_area" | "hotel" | "pharmacy" | "hospital" | "park" | "bank" | "atm" | "car_repair" | "campground";
+        PoiCategory: "gas_station" | "ev_charging" | "supermarket" | "restaurant" | "coffee" | "parking" | "rest_area" | "hotel" | "pharmacy" | "hospital" | "gym" | "park" | "bank" | "atm" | "car_repair" | "campground";
         /**
          * Point
          * @description Point Model
@@ -1007,6 +1172,26 @@ export interface components {
             datasetId: string;
         };
         /**
+         * PointFeatureCreate
+         * @description A single categorized point to add to a point dataset.
+         */
+        PointFeatureCreate: {
+            geometry: components["schemas"]["Point"];
+            /** Category */
+            category: string;
+            /** Name */
+            name?: string | null;
+            /** Tags */
+            tags?: string[];
+            /**
+             * Properties
+             * @description Arbitrary extra columns/properties carried over from the uploaded file
+             */
+            properties?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
          * Polygon
          * @description Polygon Model
          */
@@ -1111,6 +1296,19 @@ export interface components {
             id: string;
             /** Datasetid */
             datasetId: string;
+        };
+        /**
+         * PolygonFeatureCreate
+         * @description A single categorized polygon to add to a polygon dataset.
+         */
+        PolygonFeatureCreate: {
+            geometry: components["schemas"]["Polygon"];
+            /** Category */
+            category: string;
+            /** Name */
+            name?: string | null;
+            /** Tags */
+            tags?: string[];
         };
         Position2D: [
             number,
@@ -1319,6 +1517,24 @@ export interface components {
             route: components["schemas"]["Route"];
             /** @description The qualifying area feature the route passes through, when area criteria were set */
             matchedArea?: components["schemas"]["AreaMatch"] | null;
+        };
+        /**
+         * RoutingCoverage
+         * @description Which regions, if any, have fast pre-compiled routing on this deployment.
+         *
+         *     backend='networkx' means every request is routed live over a fetched OSM graph —
+         *     slower everywhere, but with no notion of compiled regions, so regions is always empty.
+         *     backend='valhalla' means routing is fast and in-process, but only within regions —
+         *     a request outside every listed region will fail outright (see is_within_coverage).
+         */
+        RoutingCoverage: {
+            /**
+             * Backend
+             * @enum {string}
+             */
+            backend: "valhalla" | "networkx";
+            /** Regions */
+            regions?: components["schemas"]["CoverageRegion"][];
         };
         /**
          * TabularPreview
@@ -1707,6 +1923,26 @@ export interface operations {
             };
         };
     };
+    get_coverage_routing_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingCoverage"];
+                };
+            };
+        };
+    };
     list_datasets_geodata_datasets_get: {
         parameters: {
             query?: {
@@ -2003,6 +2239,41 @@ export interface operations {
             };
         };
     };
+    add_point_feature_geodata_datasets_points__dataset_id__features_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PointFeatureCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PointFeature"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     label_point_feature_geodata_datasets_points__dataset_id__features__feature_id__patch: {
         parameters: {
             query?: never;
@@ -2094,6 +2365,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolygonDataset"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_polygon_feature_geodata_datasets_polygons__dataset_id__features_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolygonFeatureCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolygonFeature"];
                 };
             };
             /** @description Validation Error */

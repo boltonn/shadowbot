@@ -8,8 +8,10 @@ import type {
   PaginatedDatasetsResponse,
   PointDataset,
   PointFeature,
+  PointFeatureCreate,
   PolygonDataset,
   PolygonFeature,
+  PolygonFeatureCreate,
   TabularPreview,
   Track,
   TrackPoint,
@@ -96,6 +98,16 @@ export async function uploadPolygonDataset(
   appendCategorySource(formData, categorySource);
   formData.append("file", file);
   const response = await apiClient.post<PolygonDataset>("/geodata/datasets/polygons/upload", formData);
+  return response.data;
+}
+
+export async function createPointFeature(datasetId: string, body: PointFeatureCreate): Promise<PointFeature> {
+  const response = await apiClient.post<PointFeature>(`/geodata/datasets/points/${datasetId}/features`, body);
+  return response.data;
+}
+
+export async function createPolygonFeature(datasetId: string, body: PolygonFeatureCreate): Promise<PolygonFeature> {
+  const response = await apiClient.post<PolygonFeature>(`/geodata/datasets/polygons/${datasetId}/features`, body);
   return response.data;
 }
 

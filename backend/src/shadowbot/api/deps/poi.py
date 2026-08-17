@@ -15,7 +15,11 @@ settings = Settings()
 @lru_cache(maxsize=1)
 def get_poi_repository() -> PoiRepository:
     """Return the configured POI search backend, sharing the road network's Overpass client."""
-    return PoiRepository(config=settings.routing, overpass_client=get_overpass_client())
+    return PoiRepository(
+        config=settings.routing,
+        overpass_client=get_overpass_client(),
+        osm_website_url=settings.osm_website_url,
+    )
 
 
 PoiDatastoreDep = Annotated[PoiRepository, Depends(get_poi_repository)]

@@ -1,16 +1,9 @@
-import type { ChatLocation, ChatLocationKind } from "@/features/map/types";
+import type { ChatLocation, ChatLocationAction } from "@/features/map/types";
 
-const LOCATION_TOOL_NAMES = new Set([
-  "geocode",
-  "find_nearby_poi",
-  "find_poi_along_route",
-  "find_frequented_locations",
-  "find_point_dataset_along_route",
-  "save_location_label",
-]);
+const UPDATE_MAP_LOCATIONS_TOOL = "update_map_locations";
 
-export function isLocationTool(toolName: string): boolean {
-  return LOCATION_TOOL_NAMES.has(toolName);
+export function isMapLocationsUpdateTool(toolName: string): boolean {
+  return toolName === UPDATE_MAP_LOCATIONS_TOOL;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -30,85 +23,46 @@ function pointCoordinates(geometry: unknown): [number, number] | null {
   return [coordinates[0], coordinates[1]];
 }
 
-function toGeocodeLocation(item: unknown, id: string): ChatLocation | null {
+function stringRecord(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .map(([key, val]) => [key, val]),
+  );
+}
+
+function toChatLocation(item: unknown): ChatLocation | null {
   if (!isRecord(item)) return null;
   const coords = pointCoordinates(item.geometry);
   if (!coords) return null;
+  if (typeof item.id !== "string" || typeof item.kind !== "string" || typeof item.label !== "string") return null;
   return {
-    id,
-    kind: "geocode",
-    label: typeof item.displayName === "string" ? item.displayName : "Location",
+    id: item.id,
+    kind: item.kind,
+    label: item.label,
     longitude: coords[0],
     latitude: coords[1],
+    properties: stringRecord(item.properties),
   };
 }
 
-function toPoiLocation(item: unknown, id: string): ChatLocation | null {
-  if (!isRecord(item)) return null;
-  const coords = pointCoordinates(item.geometry);
-  if (!coords) return null;
-  const kind: ChatLocationKind = typeof item.category === "string" ? (item.category as ChatLocationKind) : "geocode";
-  // Raw OSM tags come through as "key=value" (e.g. "leisure=park") — use the value for the label.
-  const fallbackLabel = kind.includes("=") ? kind.split("=")[1] : kind;
-  return {
-    id,
-    kind,
-    label: typeof item.name === "string" && item.name ? item.name : fallbackLabel.replace(/_/g, " "),
-    longitude: coords[0],
-    latitude: coords[1],
-  };
-}
+const ACTIONS = new Set<ChatLocationAction>(["add", "replace", "remove"]);
 
-function toFrequentedLocation(item: unknown, id: string): ChatLocation | null {
-  if (!isRecord(item)) return null;
-  const coords = pointCoordinates(item.geometry);
-  if (!coords) return null;
-  const category = typeof item.category === "string" ? item.category : "unknown";
-  const visitCount = typeof item.visitCount === "number" ? item.visitCount : null;
-  const name = typeof item.name === "string" && item.name ? item.name : null;
-  const baseLabel = name ?? (category === "unknown" ? "Frequented location" : category.replace(/_/g, " "));
-  return {
-    id,
-    kind: category === "unknown" ? "frequented" : category,
-    label: visitCount ? `${baseLabel} · Visited ${visitCount}x` : baseLabel,
-    longitude: coords[0],
-    latitude: coords[1],
-  };
-}
+export type MapLocationsUpdate = { action: ChatLocationAction; locations: ChatLocation[]; removeIds: string[] };
 
-function toDatasetFeatureLocation(item: unknown, id: string): ChatLocation | null {
-  if (!isRecord(item)) return null;
-  const coords = pointCoordinates(item.geometry);
-  if (!coords) return null;
-  const category = typeof item.category === "string" ? item.category : "point";
-  const label = typeof item.name === "string" && item.name ? item.name : category.replace(/_/g, " ");
-  return { id, kind: "custom", label, longitude: coords[0], latitude: coords[1] };
-}
+/** Turns a finished update_map_locations tool call's output into a store-ready update. */
+export function extractMapLocationsUpdate(toolName: string, output: unknown): MapLocationsUpdate | null {
+  if (!isMapLocationsUpdateTool(toolName) || !isRecord(output)) return null;
+  const action = output.action;
+  if (typeof action !== "string" || !ACTIONS.has(action as ChatLocationAction)) return null;
 
-function toLocationLabel(item: unknown, id: string): ChatLocation | null {
-  if (!isRecord(item)) return null;
-  const coords = pointCoordinates(item.geometry);
-  if (!coords) return null;
-  const category = typeof item.category === "string" ? item.category : "custom";
-  const label = typeof item.name === "string" && item.name ? item.name : category.replace(/_/g, " ");
-  return { id, kind: category, label, longitude: coords[0], latitude: coords[1] };
-}
+  const locations = Array.isArray(output.locations)
+    ? output.locations.map(toChatLocation).filter((location): location is ChatLocation => location !== null)
+    : [];
+  const removeIds = Array.isArray(output.removeIds)
+    ? output.removeIds.filter((id): id is string => typeof id === "string")
+    : [];
 
-/** Turns a finished location tool call's output into map-plottable locations. */
-export function extractChatLocations(toolName: string, toolCallId: string, output: unknown): ChatLocation[] {
-  const toLocation = {
-    geocode: toGeocodeLocation,
-    find_nearby_poi: toPoiLocation,
-    find_poi_along_route: toPoiLocation,
-    find_frequented_locations: toFrequentedLocation,
-    find_point_dataset_along_route: toDatasetFeatureLocation,
-    save_location_label: toLocationLabel,
-  }[toolName];
-  if (!toLocation) return [];
-
-  // Most location tools return a list; save_location_label returns the single saved label.
-  const items = Array.isArray(output) ? output : [output];
-  return items
-    .map((item, index) => toLocation(item, `${toolCallId}-${index}`))
-    .filter((location): location is ChatLocation => location !== null);
+  return { action: action as ChatLocationAction, locations, removeIds };
 }

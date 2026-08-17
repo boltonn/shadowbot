@@ -1,45 +1,117 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Image from "next/image";
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
-import { Check, CornerDownLeft, TriangleAlert, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { RadarSweep } from "@/components/ui/radar-sweep";
-import { apiBaseUrl } from "@/lib/api-client";
-import { ApiKeyDialog } from "@/features/chat/components/api-key-dialog";
-import { useAgentConfig } from "@/features/chat/hooks/use-agent-config";
-import { useApiKey } from "@/features/chat/hooks/use-api-key";
-import { useSyncChatLocationsToMap } from "@/features/chat/hooks/use-sync-chat-locations";
-import { useSyncChatRouteToMap } from "@/features/chat/hooks/use-sync-chat-route";
-import { useSyncChatSearchRoutesToMap } from "@/features/chat/hooks/use-sync-chat-search-routes";
+import { CodeBlock } from "@/components/ai-elements/code-block";
 import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
-import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "@/components/ai-elements/tool";
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
+import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool";
+import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Label } from "@/components/ui/label";
+import { RadarSweep } from "@/components/ui/radar-sweep";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { useApiKeyStore } from "@/features/chat/api-key-store";
+import { useModelSelector } from "@/features/chat/hooks/use-model-selector";
+import { useSyncChatLocationsToMap } from "@/features/chat/hooks/use-sync-chat-locations";
+import { useSyncChatRouteToMap } from "@/features/chat/hooks/use-sync-chat-route";
+import { useSyncChatSearchRoutesToMap } from "@/features/chat/hooks/use-sync-chat-search-routes";
+import { useMapStore } from "@/features/map/store";
+import { apiBaseUrl } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import {
+  Check,
+  ChevronDownIcon,
+  CornerDownLeft,
+  Square,
+  Trash2,
+  TriangleAlert,
+  X,
+} from "lucide-react";
+import Image from "next/image";
+import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 function isAuthError(message: string) {
   return /api[_ ]?key|authenticat/i.test(message);
 }
 
-export function ChatPanel() {
-  const [sessionId] = useState(() => crypto.randomUUID());
+// Matches the backend's TRACE_MARKER in api/routes/agent.py — splits an error's short
+// message from the full traceback appended after it, so the trace can render collapsed.
+const TRACE_MARKER = "---TRACEBACK---";
+
+function splitErrorTrace(message: string): { summary: string; trace?: string } {
+  const index = message.indexOf(TRACE_MARKER);
+  if (index === -1) return { summary: message };
+  return {
+    summary: message.slice(0, index).trim(),
+    trace: message.slice(index + TRACE_MARKER.length).trim(),
+  };
+}
+
+const LOG_LEVEL_STYLES: Record<string, string> = {
+  WARNING: "text-amber-500",
+  ERROR: "text-destructive",
+  CRITICAL: "text-destructive",
+};
+
+interface LogData {
+  level: string;
+  message: string;
+}
+
+function isLogData(data: unknown): data is LogData {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "level" in data &&
+    "message" in data &&
+    typeof (data as { message: unknown }).message === "string"
+  );
+}
+
+export function ChatPanel({
+  headerActionsEl,
+}: {
+  headerActionsEl: HTMLDivElement | null;
+}) {
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
   const [input, setInput] = useState("");
   const [showTrace, setShowTrace] = useState(true);
-  const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false);
-  const { apiKey, setApiKey } = useApiKey();
-  const { data: agentConfig } = useAgentConfig();
-  const [hasPromptedForKey, setHasPromptedForKey] = useState(false);
-  const [lastHandledError, setLastHandledError] = useState<Error | undefined>(undefined);
+  const apiKey = useApiKeyStore((state) => state.apiKey);
+  const openApiKeyDialog = useApiKeyStore((state) => state.openDialog);
+  const { model, modelId } = useModelSelector();
+  const [lastPromptedModelId, setLastPromptedModelId] = useState<
+    string | undefined
+  >(undefined);
+  const [lastHandledError, setLastHandledError] = useState<Error | undefined>(
+    undefined,
+  );
 
   const transport = useMemo(
     () =>
@@ -49,20 +121,35 @@ export function ChatPanel() {
           const lastMessage = messages[messages.length - 1];
           const text =
             lastMessage?.parts
-              ?.filter((part): part is { type: "text"; text: string } => part.type === "text")
+              ?.filter(
+                (part): part is { type: "text"; text: string } =>
+                  part.type === "text",
+              )
               .map((part) => part.text)
               .join("") ?? "";
           return {
-            body: { message: text, sessionId, apiKey: apiKey || undefined },
+            body: {
+              message: text,
+              sessionId,
+              apiKey: apiKey || undefined,
+              modelId,
+            },
           };
         },
       }),
-    [apiKey, sessionId],
+    [apiKey, modelId, sessionId],
   );
 
-  const { messages, sendMessage, status, error, clearError, addToolApprovalResponse } = useChat({
-    transport,
-  });
+  const {
+    messages,
+    sendMessage,
+    status,
+    error,
+    clearError,
+    addToolApprovalResponse,
+    stop,
+    setMessages,
+  } = useChat({ transport });
   useSyncChatLocationsToMap(messages);
   useSyncChatRouteToMap(messages);
   useSyncChatSearchRoutesToMap(messages);
@@ -83,37 +170,66 @@ export function ChatPanel() {
     setInput("");
   };
 
+  const handleClear = () => {
+    stop();
+    setMessages([]);
+    clearError();
+    setSessionId(crypto.randomUUID());
+    useMapStore.getState().setActiveRoute(null);
+    useMapStore.getState().clearMatchedRoutes();
+    useMapStore.getState().applyChatLocationsUpdate("replace", [], []);
+  };
+
   // Adjusting state in response to a prop/hook-state change, computed during render rather
   // than in an Effect — see https://react.dev/learn/you-might-not-need-an-effect.
   if (error !== lastHandledError) {
     setLastHandledError(error);
     if (error && isAuthError(error.message)) {
-      setApiKeyDialogOpen(true);
+      openApiKeyDialog();
     }
   }
 
-  // Prompt for a key up front (once) rather than waiting for the first request to fail,
-  // if the server has no key of its own configured and the user hasn't supplied one.
-  if (!hasPromptedForKey && agentConfig && !apiKey && !agentConfig.hasServerKey) {
-    setHasPromptedForKey(true);
-    setApiKeyDialogOpen(true);
+  // Prompt for a key up front rather than waiting for the first request to fail, if the
+  // selected model has no server-side key and the user hasn't supplied one. Re-checked
+  // whenever the selected model changes — a server key for one provider doesn't cover
+  // every model in the picker (e.g. an Anthropic key doesn't authenticate Gemini).
+  if (modelId && modelId !== lastPromptedModelId) {
+    setLastPromptedModelId(modelId);
+    if (!apiKey && model && !model.hasKey) {
+      openApiKeyDialog();
+    }
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {headerActionsEl &&
+        createPortal(
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-7 rounded-none text-muted-foreground hover:text-destructive"
+            disabled={messages.length === 0 && !isBusy}
+            onClick={handleClear}
+            title="Clear chat"
+          >
+            <Trash2 className="size-3.5" />
+          </Button>,
+          headerActionsEl,
+        )}
+
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
-        <Label htmlFor="show-trace" className="text-xs font-normal text-muted-foreground">
+        <Label
+          htmlFor="show-trace"
+          className="text-xs font-normal text-muted-foreground"
+        >
           Show tool calls
         </Label>
-        <div className="flex items-center gap-3">
-          <Switch id="show-trace" checked={showTrace} onCheckedChange={setShowTrace} />
-          <ApiKeyDialog
-            apiKey={apiKey}
-            onApiKeyChange={setApiKey}
-            open={apiKeyDialogOpen}
-            onOpenChange={setApiKeyDialogOpen}
-          />
-        </div>
+        <Switch
+          id="show-trace"
+          checked={showTrace}
+          onCheckedChange={setShowTrace}
+        />
       </div>
 
       <Conversation>
@@ -136,101 +252,160 @@ export function ChatPanel() {
                 />
               )}
               <Message from={message.role}>
-              <MessageContent>
-                <span className="font-mono text-[10px] tracking-[0.15em] text-muted-foreground uppercase">
-                  {message.role === "user" ? "You" : "Shadowbot"}
-                </span>
-                {message.parts.map((part, index) => {
-                  if (part.type === "text") {
-                    return <MessageResponse key={index}>{part.text}</MessageResponse>;
-                  }
-                  if (part.type === "reasoning") {
-                    return (
-                      <Reasoning key={index} isStreaming={part.state === "streaming"}>
-                        <ReasoningTrigger />
-                        <ReasoningContent>{part.text}</ReasoningContent>
-                      </Reasoning>
-                    );
-                  }
-                  if (part.type === "dynamic-tool") {
-                    if (part.state === "approval-requested") {
+                <MessageContent>
+                  <span className="font-mono text-[10px] tracking-[0.15em] text-muted-foreground uppercase">
+                    {message.role === "user" ? "You" : "Shadowbot"}
+                  </span>
+                  {message.parts.map((part, index) => {
+                    if (part.type === "text") {
+                      return (
+                        <MessageResponse key={index}>
+                          {part.text}
+                        </MessageResponse>
+                      );
+                    }
+                    if (part.type === "reasoning") {
+                      return (
+                        <Reasoning
+                          key={index}
+                          isStreaming={part.state === "streaming"}
+                        >
+                          <ReasoningTrigger />
+                          <ReasoningContent>{part.text}</ReasoningContent>
+                        </Reasoning>
+                      );
+                    }
+                    if (part.type === "dynamic-tool") {
+                      if (part.state === "approval-requested") {
+                        return (
+                          <div
+                            key={index}
+                            className="flex flex-col gap-2 border border-signal/40 bg-signal/10 px-2.5 py-2"
+                          >
+                            <span className="font-mono text-[11px]">
+                              Approval needed: {part.toolName}(
+                              {JSON.stringify(part.input)})
+                            </span>
+                            <div className="flex gap-1.5">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="rounded-none"
+                                onClick={() =>
+                                  addToolApprovalResponse({
+                                    id: part.approval.id,
+                                    approved: true,
+                                  })
+                                }
+                              >
+                                <Check className="size-3.5" />
+                                Approve
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="rounded-none"
+                                onClick={() =>
+                                  addToolApprovalResponse({
+                                    id: part.approval.id,
+                                    approved: false,
+                                  })
+                                }
+                              >
+                                <X className="size-3.5" />
+                                Deny
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (!showTrace) return null;
+                      return (
+                        <Tool key={index}>
+                          <ToolHeader
+                            type="dynamic-tool"
+                            toolName={part.toolName}
+                            state={part.state}
+                          />
+                          <ToolContent>
+                            <ToolInput
+                              input={"input" in part ? part.input : undefined}
+                            />
+                            <ToolOutput
+                              output={
+                                "output" in part ? part.output : undefined
+                              }
+                              errorText={
+                                "errorText" in part ? part.errorText : undefined
+                              }
+                            />
+                          </ToolContent>
+                        </Tool>
+                      );
+                    }
+                    if (part.type === "data-log" && isLogData(part.data)) {
                       return (
                         <div
-                          key={index}
-                          className="flex flex-col gap-2 border border-signal/40 bg-signal/10 px-2.5 py-2"
+                          key={part.id ?? index}
+                          className={cn(
+                            "font-mono text-[11px] leading-relaxed",
+                            LOG_LEVEL_STYLES[part.data.level] ??
+                              "text-muted-foreground",
+                          )}
                         >
-                          <span className="font-mono text-[11px]">
-                            Approval needed: {part.toolName}({JSON.stringify(part.input)})
-                          </span>
-                          <div className="flex gap-1.5">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="rounded-none"
-                              onClick={() =>
-                                addToolApprovalResponse({ id: part.approval.id, approved: true })
-                              }
-                            >
-                              <Check className="size-3.5" />
-                              Approve
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="rounded-none"
-                              onClick={() =>
-                                addToolApprovalResponse({ id: part.approval.id, approved: false })
-                              }
-                            >
-                              <X className="size-3.5" />
-                              Deny
-                            </Button>
-                          </div>
+                          {part.data.message}
                         </div>
                       );
                     }
-                    if (!showTrace) return null;
-                    return (
-                      <Tool key={index}>
-                        <ToolHeader type="dynamic-tool" toolName={part.toolName} state={part.state} />
-                        <ToolContent>
-                          <ToolInput input={"input" in part ? part.input : undefined} />
-                          <ToolOutput
-                            output={"output" in part ? part.output : undefined}
-                            errorText={"errorText" in part ? part.errorText : undefined}
-                          />
-                        </ToolContent>
-                      </Tool>
-                    );
-                  }
-                  return null;
-                })}
-              </MessageContent>
+                    return null;
+                  })}
+                </MessageContent>
               </Message>
             </div>
           ))}
           {showThinkingIndicator && <RadarSweep theme="dark" size={20} />}
-          {error && (
-            <div className="flex items-start gap-2 border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-sm text-destructive">
-              <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-              <div className="flex min-w-0 flex-col gap-1">
-                <span className="break-words whitespace-pre-wrap">{error.message}</span>
-                {isAuthError(error.message) && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="w-fit rounded-none"
-                    onClick={() => setApiKeyDialogOpen(true)}
-                  >
-                    Set API key
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
+          {error &&
+            (() => {
+              const { summary, trace } = splitErrorTrace(error.message);
+              return (
+                <div className="flex items-start gap-2 border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-sm text-destructive">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="break-words whitespace-pre-wrap">
+                      {summary}
+                    </span>
+                    {isAuthError(summary) && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="w-fit rounded-none"
+                        onClick={openApiKeyDialog}
+                      >
+                        Set API key
+                      </Button>
+                    )}
+                    {trace && (
+                      <Collapsible className="group">
+                        <CollapsibleTrigger className="flex w-fit items-center gap-1 text-xs text-destructive/80 hover:text-destructive">
+                          Show trace
+                          <ChevronDownIcon className="size-3 transition-transform group-data-[state=open]:rotate-180" />
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-1.5">
+                          <CodeBlock
+                            code={trace}
+                            language="console"
+                            className="text-xs"
+                          />
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
@@ -248,15 +423,28 @@ export function ChatPanel() {
           placeholder="Ask Shadowbot..."
           className="min-h-10 rounded-none"
         />
-        <Button
-          type="button"
-          size="icon"
-          className="rounded-none"
-          disabled={isBusy || !input.trim()}
-          onClick={handleSend}
-        >
-          <CornerDownLeft className="size-4" />
-        </Button>
+        {isBusy ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            className="rounded-none"
+            onClick={stop}
+            title="Stop"
+          >
+            <Square className="size-3.5 fill-current" />
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="icon"
+            className="rounded-none"
+            disabled={!input.trim()}
+            onClick={handleSend}
+          >
+            <CornerDownLeft className="size-4" />
+          </Button>
+        )}
       </div>
     </div>
   );

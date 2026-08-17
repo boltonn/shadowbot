@@ -51,6 +51,34 @@ class LLMSettings(BaseModel):
         return value or None
 
 
+class ModelOption(BaseModel):
+    """A selectable model exposed to the frontend's chat model picker."""
+
+    id: str
+    provider: LLMProvider
+    model: str
+    label: str
+
+    model_config = {"frozen": True}
+
+
+AVAILABLE_MODELS: tuple[ModelOption, ...] = (
+    ModelOption(id="claude-sonnet-5", provider=LLMProvider.ANTHROPIC, model="claude-sonnet-5", label="Claude Sonnet 5"),
+    ModelOption(id="claude-opus-5", provider=LLMProvider.ANTHROPIC, model="claude-opus-5", label="Claude Opus 5"),
+    ModelOption(id="claude-haiku-4-5", provider=LLMProvider.ANTHROPIC, model="claude-haiku-4-5", label="Claude Haiku 4.5"),
+    ModelOption(id="gemini-2.5-pro", provider=LLMProvider.GOOGLE, model="gemini-2.5-pro", label="Gemini 2.5 Pro"),
+    ModelOption(id="gemini-2.5-flash", provider=LLMProvider.GOOGLE, model="gemini-2.5-flash", label="Gemini 2.5 Flash"),
+)
+
+
+def resolve_llm_settings(base: LLMSettings, model_id: str | None) -> LLMSettings:
+    """Overrides base's provider/model with the AVAILABLE_MODELS entry for model_id, if any."""
+    option = next((m for m in AVAILABLE_MODELS if m.id == model_id), None)
+    if option is None:
+        return base
+    return base.model_copy(update={"provider": option.provider, "model": option.model})
+
+
 def build_model(settings: LLMSettings) -> Model:
     """Construct the configured pydantic-ai Model."""
     if settings.provider == LLMProvider.ANTHROPIC:

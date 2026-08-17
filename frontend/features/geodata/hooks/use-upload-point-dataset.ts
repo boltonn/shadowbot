@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { uploadPointDataset } from "@/features/geodata/api";
+import { datasetKeys } from "@/features/geodata/query-keys";
 
 type UploadPointDatasetInput = {
   name: string;
@@ -15,7 +16,7 @@ export function useUploadPointDataset() {
     mutationFn: ({ name, file, categorySource, latLonFields }: UploadPointDatasetInput) =>
       uploadPointDataset(name, file, categorySource, latLonFields),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: datasetKeys.all });
     },
   });
 }

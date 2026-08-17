@@ -1,26 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { FeatureCollection, Polygon } from "geojson";
 import type { FillLayerSpecification, GeoJSONSource, LineLayerSpecification, MapGeoJSONFeature, MapMouseEvent } from "maplibre-gl";
-import { MapPopup, useMap } from "@/components/ui/map";
-import { useDatasetDetail } from "@/features/geodata/hooks/use-dataset-detail";
-import { categoryColorMatchExpression } from "@/features/geodata/lib/category-icons";
+import { useMap } from "@/components/ui/map";
+import { useSuspenseDatasetDetail } from "@/features/geodata/hooks/use-dataset-detail";
+import { categoryColorMatchExpression, FALLBACK_CATEGORY_COLOR } from "@/features/geodata/lib/category-icons";
+import { useCategoryColorStore } from "@/features/geodata/category-color-store";
 import { fitToCoordinates } from "@/features/map/lib/fit-bounds";
-import type { PolygonDatasetDetail } from "@/features/geodata/types";
+import { useMapStore } from "@/features/map/store";
 
 type PolygonProperties = { polygonId: string; category: string; name: string | null };
 type FillColorExpression = NonNullable<FillLayerSpecification["paint"]>["fill-color"];
 type LineColorExpression = NonNullable<LineLayerSpecification["paint"]>["line-color"];
 
-function fillColorExpression(categories: string[]): FillColorExpression {
-  if (categories.length === 0) return "#8a9099" as FillColorExpression;
-  return categoryColorMatchExpression(categories) as FillColorExpression;
+function fillColorExpression(categories: string[], overrides: Record<string, string>): FillColorExpression {
+  if (categories.length === 0) return FALLBACK_CATEGORY_COLOR as FillColorExpression;
+  return categoryColorMatchExpression(categories, overrides) as FillColorExpression;
 }
 
-function lineColorExpression(categories: string[]): LineColorExpression {
-  if (categories.length === 0) return "#8a9099" as LineColorExpression;
-  return categoryColorMatchExpression(categories) as LineColorExpression;
+function lineColorExpression(categories: string[], overrides: Record<string, string>): LineColorExpression {
+  if (categories.length === 0) return FALLBACK_CATEGORY_COLOR as LineColorExpression;
+  return categoryColorMatchExpression(categories, overrides) as LineColorExpression;
 }
 
 const EMPTY_FEATURE_COLLECTION: FeatureCollection<Polygon, PolygonProperties> = {
@@ -28,30 +29,35 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection<Polygon, PolygonProperties> = 
   features: [],
 };
 
-type OpenPopup = { longitude: number; latitude: number; name: string; category: string };
-
 export function PolygonDatasetLayer({ datasetId }: { datasetId: string }) {
   const { map, isLoaded } = useMap();
-  const { data } = useDatasetDetail(datasetId, true);
-  const dataset = data && data.geometryKind === "polygon" ? (data as PolygonDatasetDetail) : undefined;
+  const { data } = useSuspenseDatasetDetail(datasetId);
+  const dataset = data.geometryKind === "polygon" ? data : undefined;
+  const filterSet = useMapStore((state) => state.filteredFeatureIds[datasetId]) ?? null;
+  const setSelectedFeature = useMapStore((state) => state.setSelectedFeature);
+  const overrides = useCategoryColorStore((state) => state.overrides);
   const hasFitRef = useRef(false);
-  const [openPopup, setOpenPopup] = useState<OpenPopup | null>(null);
 
   const sourceId = `polygon-dataset-${datasetId}`;
   const fillLayerId = `${sourceId}-fill`;
   const outlineLayerId = `${sourceId}-outline`;
 
-  const geojsonData = useMemo<FeatureCollection<Polygon, PolygonProperties>>(() => {
-    if (!dataset) return EMPTY_FEATURE_COLLECTION;
-    return {
+  const polygons = useMemo(
+    () => (dataset ? (filterSet ? dataset.polygons.filter((polygon) => filterSet.has(polygon.id)) : dataset.polygons) : []),
+    [dataset, filterSet],
+  );
+
+  const geojsonData = useMemo<FeatureCollection<Polygon, PolygonProperties>>(
+    () => ({
       type: "FeatureCollection",
-      features: dataset.polygons.map((polygon) => ({
+      features: polygons.map((polygon) => ({
         type: "Feature",
         geometry: polygon.geometry,
         properties: { polygonId: polygon.id, category: polygon.category, name: polygon.name },
       })),
-    };
-  }, [dataset]);
+    }),
+    [polygons],
+  );
 
   useEffect(() => {
     if (!map || !dataset || dataset.polygons.length === 0 || hasFitRef.current) return;
@@ -71,7 +77,7 @@ export function PolygonDatasetLayer({ datasetId }: { datasetId: string }) {
       type: "fill",
       source: sourceId,
       paint: {
-        "fill-color": fillColorExpression(categories),
+        "fill-color": fillColorExpression(categories, overrides),
         "fill-opacity": 0.25,
       },
     });
@@ -81,7 +87,7 @@ export function PolygonDatasetLayer({ datasetId }: { datasetId: string }) {
       type: "line",
       source: sourceId,
       paint: {
-        "line-color": lineColorExpression(categories),
+        "line-color": lineColorExpression(categories, overrides),
         "line-width": 2,
       },
     });
@@ -103,12 +109,12 @@ export function PolygonDatasetLayer({ datasetId }: { datasetId: string }) {
     const source = map.getSource(sourceId) as GeoJSONSource | undefined;
     source?.setData(geojsonData);
     if (map.getLayer(fillLayerId)) {
-      map.setPaintProperty(fillLayerId, "fill-color", fillColorExpression(categories));
+      map.setPaintProperty(fillLayerId, "fill-color", fillColorExpression(categories, overrides));
     }
     if (map.getLayer(outlineLayerId)) {
-      map.setPaintProperty(outlineLayerId, "line-color", lineColorExpression(categories));
+      map.setPaintProperty(outlineLayerId, "line-color", lineColorExpression(categories, overrides));
     }
-  }, [isLoaded, map, geojsonData, categories, sourceId, fillLayerId, outlineLayerId]);
+  }, [isLoaded, map, geojsonData, categories, overrides, sourceId, fillLayerId, outlineLayerId]);
 
   useEffect(() => {
     if (!isLoaded || !map) return;
@@ -116,13 +122,8 @@ export function PolygonDatasetLayer({ datasetId }: { datasetId: string }) {
     const handleClick = (e: MapMouseEvent & { features?: MapGeoJSONFeature[] }) => {
       const feature = e.features?.[0];
       if (!feature) return;
-      const category = feature.properties?.category as string;
-      setOpenPopup({
-        longitude: e.lngLat.lng,
-        latitude: e.lngLat.lat,
-        name: (feature.properties?.name as string) || category,
-        category,
-      });
+      const polygonId = feature.properties?.polygonId as string;
+      setSelectedFeature({ datasetId, featureId: polygonId });
     };
     const setPointer = () => {
       map.getCanvas().style.cursor = "pointer";
@@ -140,14 +141,7 @@ export function PolygonDatasetLayer({ datasetId }: { datasetId: string }) {
       map.off("mouseenter", fillLayerId, setPointer);
       map.off("mouseleave", fillLayerId, clearPointer);
     };
-  }, [isLoaded, map, fillLayerId]);
+  }, [isLoaded, map, fillLayerId, datasetId, setSelectedFeature]);
 
-  if (!openPopup) return null;
-
-  return (
-    <MapPopup longitude={openPopup.longitude} latitude={openPopup.latitude} onClose={() => setOpenPopup(null)} closeButton>
-      <p className="text-sm font-medium">{openPopup.name}</p>
-      <p className="text-xs text-muted-foreground capitalize">{openPopup.category}</p>
-    </MapPopup>
-  );
+  return null;
 }

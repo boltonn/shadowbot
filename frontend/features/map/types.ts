@@ -1,37 +1,20 @@
 /**
- * Known kinds get a dedicated icon (see chat-location-markers.tsx). The `string & {}`
- * member keeps literal autocomplete for those while still accepting anything else —
- * POI search can return arbitrary "key=value" OSM tags beyond the curated list.
+ * A location the agent has explicitly chosen to plot via the update_map_locations tool.
+ * `kind` is an icon category (see features/geodata/lib/category-icons.ts) — known values get
+ * a dedicated icon, anything else (raw OSM "key=value" tags, etc.) falls back to a generic pin.
  */
-export type ChatLocationKind =
-  | "geocode"
-  | "frequented"
-  | "gas_station"
-  | "ev_charging"
-  | "supermarket"
-  | "restaurant"
-  | "coffee"
-  | "parking"
-  | "rest_area"
-  | "hotel"
-  | "pharmacy"
-  | "hospital"
-  | "park"
-  | "bank"
-  | "atm"
-  | "car_repair"
-  | "campground"
-  | "custom"
-  | (string & {});
-
-/** A location surfaced by a chat tool call (geocode, POI search, frequented locations). */
 export type ChatLocation = {
   id: string;
-  kind: ChatLocationKind;
+  kind: string;
   label: string;
   longitude: number;
   latitude: number;
+  /** Raw element detail carried over from the source tool (osm_type/osm_id/url/address/raw_tags, etc.). */
+  properties: Record<string, string>;
 };
+
+/** How a set of chat locations should change what's currently plotted on the map. */
+export type ChatLocationAction = "add" | "replace" | "remove";
 
 /** An inclusive [start, end] ISO datetime range. */
 export type TimeWindow = [string, string];

@@ -58,8 +58,9 @@ class NominatimConfig(BaseModel):
 class NominatimClient:
     """Thin async wrapper around a Nominatim /search endpoint."""
 
-    def __init__(self, config: NominatimConfig):
+    def __init__(self, config: NominatimConfig, osm_website_url: str):
         self.config = config
+        self.osm_website_url = osm_website_url
 
     async def geocode(self, request: GeocodeRequest) -> list[GeocodeResult]:
         """Resolve a free-text query into candidate locations.
@@ -83,22 +84,32 @@ class NominatimClient:
         ) as client:
             response = await client.get(
                 f"{self.config.nominatim_url.rstrip('/')}/search",
-                params={"q": query, "format": "jsonv2", "limit": limit},
+                params={"q": query, "format": "jsonv2", "limit": limit, "addressdetails": 1},
             )
             response.raise_for_status()
             results = response.json()
 
-        return [
-            GeocodeResult(
-                display_name=result["display_name"],
-                geometry=Point(
-                    type="Point",
-                    coordinates=Position2D(longitude=float(result["lon"]), latitude=float(result["lat"])),
-                ),
-                place_type=result.get("type"),
-            )
-            for result in results
-        ]
+        return [self._to_geocode_result(result) for result in results]
+
+    def _to_geocode_result(self, result: dict) -> GeocodeResult:
+        """Map a raw Nominatim jsonv2 result to a GeocodeResult, keeping its OSM identity and address."""
+        osm_type = result.get("osm_type")
+        osm_id = result.get("osm_id")
+        return GeocodeResult(
+            display_name=result["display_name"],
+            geometry=Point(
+                type="Point",
+                coordinates=Position2D(longitude=float(result["lon"]), latitude=float(result["lat"])),
+            ),
+            place_type=result.get("type"),
+            osm_type=osm_type,
+            osm_id=osm_id,
+            # Newer Nominatim renamed jsonv2's "class" field to "category" — accept either
+            # so this still works against an older self-hosted instance.
+            osm_class=result.get("category") or result.get("class"),
+            address={k: str(v) for k, v in (result.get("address") or {}).items()},
+            url=f"{self.osm_website_url.rstrip('/')}/{osm_type}/{osm_id}" if osm_type and osm_id else None,
+        )
 
     def _httpx_cert(self) -> str | tuple[str, str] | None:
         if self.config.cert is None:

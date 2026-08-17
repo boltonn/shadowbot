@@ -1,78 +1,83 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
-import { BookOpen } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { ActivityRail, VIEWS, type ViewId } from "@/components/activity-rail";
+import { ResizableSidebar } from "@/components/resizable-sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ChatPanel } from "@/features/chat/components/chat-panel";
 import { GeodataPanel } from "@/features/geodata/components/geodata-panel";
+import { FindLocationPanel } from "@/features/location/components/find-location-panel";
 import { MapView } from "@/features/map/components/map-view";
-import { ResizableSidebar } from "@/components/resizable-sidebar";
+import { RoutePlannerPanel } from "@/features/routing/components/route-planner-panel";
+import { cn } from "@/lib/utils";
+import { useState } from "react";
 
 export default function Home() {
+  const [activeView, setActiveView] = useState<ViewId>("chat");
+  const [headerActionsEl, setHeaderActionsEl] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const activeViewMeta = VIEWS.find((view) => view.id === activeView);
+  const ActiveIcon = activeViewMeta?.icon;
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
-      <div className="relative flex-1">
-        <MapView />
-      </div>
-      <ResizableSidebar>
-        <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
-          <Image
-            src="/logo.png"
-            alt="Shadowbot"
-            width={20}
-            height={20}
-            className="size-5 shrink-0 rounded-full"
-          />
-          <span className="font-mono text-xs font-medium tracking-[0.2em] text-foreground uppercase">
-            Shadowbot
-          </span>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Link
-                    href="/docs"
-                    className="ml-auto text-muted-foreground transition-colors hover:text-signal"
-                  />
-                }
-              >
-                <BookOpen className="size-4" />
-                <span className="sr-only">Documentation</span>
-              </TooltipTrigger>
-              <TooltipContent>Documentation</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </header>
-        <div className="flex min-h-0 flex-1 flex-col">
-          <Tabs defaultValue="chat" className="flex h-full min-h-0 flex-1 flex-col gap-0">
-            <TabsList
-              variant="line"
-              className="h-auto w-full shrink-0 justify-start gap-0 border-b border-border bg-transparent p-0"
+    <TooltipProvider>
+      <div className="flex h-screen w-screen overflow-hidden">
+        <ActivityRail active={activeView} onChange={setActiveView} />
+        <ResizableSidebar>
+          {/* Matches the rail's logo band height (activity-rail.tsx) so the two top bands align. */}
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
+            {ActiveIcon && <ActiveIcon className="size-4 text-signal" />}
+            <span className="font-mono text-xs font-medium tracking-[0.2em] text-foreground uppercase">
+              {activeViewMeta?.label}
+            </span>
+            {/* Per-view header actions (e.g. clear chat) portal into this slot so they sit
+                next to the view title, the spot users expect an action-on-this-view to live. */}
+            <div
+              ref={setHeaderActionsEl}
+              className="ml-auto flex items-center gap-1"
+            />
+          </header>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 flex-col",
+                activeView !== "chat" && "hidden",
+              )}
             >
-              <TabsTrigger
-                value="chat"
-                className="h-10 flex-1 rounded-none font-mono text-[11px] tracking-[0.15em] uppercase after:bg-signal data-active:text-signal"
-              >
-                Chat
-              </TabsTrigger>
-              <TabsTrigger
-                value="geodata"
-                className="h-10 flex-1 rounded-none font-mono text-[11px] tracking-[0.15em] uppercase after:bg-signal data-active:text-signal"
-              >
-                Geodata
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="chat" keepMounted className="flex min-h-0 flex-1 flex-col">
-              <ChatPanel />
-            </TabsContent>
-            <TabsContent value="geodata" keepMounted className="min-h-0 flex-1 overflow-y-auto">
+              <ChatPanel
+                headerActionsEl={activeView === "chat" ? headerActionsEl : null}
+              />
+            </div>
+            <div
+              className={cn(
+                "min-h-0 flex-1 overflow-y-auto",
+                activeView !== "data" && "hidden",
+              )}
+            >
               <GeodataPanel />
-            </TabsContent>
-          </Tabs>
+            </div>
+            <div
+              className={cn(
+                "min-h-0 flex-1 overflow-y-auto",
+                activeView !== "routing" && "hidden",
+              )}
+            >
+              <RoutePlannerPanel />
+            </div>
+            <div
+              className={cn(
+                "min-h-0 flex-1 overflow-y-auto",
+                activeView !== "location" && "hidden",
+              )}
+            >
+              <FindLocationPanel />
+            </div>
+          </div>
+        </ResizableSidebar>
+        <div className="relative flex-1">
+          <MapView />
         </div>
-      </ResizableSidebar>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }

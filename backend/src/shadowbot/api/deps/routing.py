@@ -9,6 +9,8 @@ from shadowbot.api.deps.overpass import get_overpass_client
 from shadowbot.api.settings import Settings
 from shadowbot.datastores.base.routing import RoutingRepository
 from shadowbot.datastores.networkx.repository import NetworkXRoutingRepository
+from shadowbot.datastores.valhalla.coverage import load_coverage_regions
+from shadowbot.schemas.routing import RoutingCoverage
 
 settings = Settings()
 
@@ -35,4 +37,17 @@ def get_routing_repository() -> RoutingRepository:
     return NetworkXRoutingRepository(config=settings.routing, overpass_client=get_overpass_client())
 
 
+@lru_cache(maxsize=1)
+def get_routing_coverage() -> RoutingCoverage:
+    """Which regions, if any, have fast pre-compiled routing on this deployment.
+
+    Backend and region list are both static for the life of the process — same
+    lru_cache pattern as get_routing_repository, re-derived only on restart.
+    """
+    if settings.valhalla.tile_uri is None:
+        return RoutingCoverage(backend="networkx", regions=[])
+    return RoutingCoverage(backend="valhalla", regions=load_coverage_regions(settings.valhalla))
+
+
 RoutingDatastoreDep = Annotated[RoutingRepository, Depends(get_routing_repository)]
+RoutingCoverageDep = Annotated[RoutingCoverage, Depends(get_routing_coverage)]

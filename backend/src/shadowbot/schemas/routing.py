@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from geojson_pydantic import LineString, Point, Polygon
 from pydantic import Field, model_validator
@@ -26,11 +27,21 @@ class GeocodeRequest(CamelModel):
 
 
 class GeocodeResult(CamelModel):
-    """A single geocoding match."""
+    """A single geocoding match, carrying Nominatim's raw OSM identity and address detail
+    so a caller can show the underlying element rather than just a name and a pin."""
 
     display_name: str
     geometry: Point
     place_type: str | None = Field(default=None)
+    osm_type: str | None = Field(default=None, description="OSM element type: node, way, or relation")
+    osm_id: int | None = Field(default=None)
+    osm_class: str | None = Field(
+        default=None, description="Nominatim's category/class field, e.g. 'amenity', 'shop'"
+    )
+    address: dict[str, str] = Field(
+        default_factory=dict, description="Structured address components (house_number, road, city, state, etc.)"
+    )
+    url: str | None = Field(default=None, description="Link to the raw element on openstreetmap.org")
 
 
 class AvoidancePreferences(CamelModel):
@@ -139,6 +150,12 @@ class AreaMatch(CamelModel):
             "proxy for entrances/exits, since OSM entrance tagging is too inconsistent to rely on directly."
         )
     )
+    osm_type: str | None = Field(default=None, description="OSM element type: way or relation (areas are never nodes)")
+    osm_id: int | None = Field(default=None)
+    raw_tags: dict[str, str] = Field(
+        default_factory=dict, description="Every OSM tag on the element (name, operator, website, etc.)"
+    )
+    url: str | None = Field(default=None, description="Link to the raw element on openstreetmap.org")
 
 
 class RouteSearchCriteria(CamelModel):
@@ -277,3 +294,30 @@ class MatrixEntry(CamelModel):
 
     distance_m: float | None
     duration_s: float | None
+
+
+class CoverageRegion(CamelModel):
+    """An area with fast, pre-compiled Valhalla tile coverage.
+
+    Hand-curated documentation (see scripts/describe_coverage_area.py), not a build
+    manifest — an area's bounds don't need to track 1:1 with whatever PBFs are actually
+    registered for the tile build at any given moment.
+    """
+
+    name: str
+    url: str | None = Field(default=None, description="Where this area's extract was originally downloaded from")
+    bounds: Polygon = Field(description="Rectangular bounding box of the area's OSM extract")
+    date_added: datetime
+
+
+class RoutingCoverage(CamelModel):
+    """Which regions, if any, have fast pre-compiled routing on this deployment.
+
+    backend='networkx' means every request is routed live over a fetched OSM graph —
+    slower everywhere, but with no notion of compiled regions, so regions is always empty.
+    backend='valhalla' means routing is fast and in-process, but only within regions —
+    a request outside every listed region will fail outright (see is_within_coverage).
+    """
+
+    backend: Literal["valhalla", "networkx"]
+    regions: list[CoverageRegion] = Field(default_factory=list)

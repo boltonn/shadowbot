@@ -26,6 +26,15 @@ class ValhallaRoutingConfig(BaseModel):
         default=Path.home() / "data" / "valhalla",
         description="Local directory used to cache a tile extract downloaded from S3",
     )
+    coverage_uri: str | None = Field(
+        default=None,
+        description=(
+            "Location of the coverage.json manifest describing which regions have fast, "
+            "pre-compiled tile coverage — written by scripts/build_valhalla_tiles.py next to "
+            "tiles.tar. A local path or s3:// URI, same rules as tile_uri. Leave unset to derive "
+            "it as a 'coverage.json' sibling of tile_uri."
+        ),
+    )
 
     @field_validator("cache_dir", mode="after")
     @classmethod

@@ -12,26 +12,34 @@ def resolve_tile_path(config: ValhallaRoutingConfig) -> Path:
     """Return a local path to the tile extract/directory, downloading it from S3 on first use."""
     if config.tile_uri is None:
         raise ValueError("ROUTING__VALHALLA__TILE_URI (or VALHALLA__TILE_URI) is not set")
+    return resolve_uri(config.tile_uri, cache_dir=config.cache_dir)
 
-    if not config.tile_uri.startswith("s3://"):
-        return Path(config.tile_uri).expanduser()
+
+def resolve_uri(uri: str, *, cache_dir: Path) -> Path:
+    """Return a local path for a local-path-or-s3:// URI, downloading it from S3 on first use.
+
+    Shared by resolve_tile_path (the tile extract/directory) and the coverage manifest
+    loader (datastores/valhalla/coverage.py) — same caching rules, different files.
+    """
+    if not uri.startswith("s3://"):
+        return Path(uri).expanduser()
 
     try:
         import boto3
     except ImportError as exc:
         raise ImportError(
-            "VALHALLA__TILE_URI is an s3:// URI but boto3 isn't installed — run `uv sync --extra valhalla`."
+            "An s3:// URI was given but boto3 isn't installed — run `uv sync --extra valhalla`."
         ) from exc
 
-    parsed = urlparse(config.tile_uri)
+    parsed = urlparse(uri)
     bucket, key = parsed.netloc, parsed.path.lstrip("/")
-    local_path = config.cache_dir / Path(key).name
+    local_path = cache_dir / Path(key).name
     if local_path.exists():
-        logger.info(f"Using cached Valhalla tile extract at {local_path}")
+        logger.info(f"Using cached copy of {uri} at {local_path}")
         return local_path
 
-    config.cache_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Downloading Valhalla tile extract from {config.tile_uri} to {local_path}")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Downloading {uri} to {local_path}")
     boto3.client("s3").download_file(bucket, key, str(local_path))
-    logger.info(f"Cached Valhalla tile extract to {local_path}")
+    logger.info(f"Cached {uri} to {local_path}")
     return local_path

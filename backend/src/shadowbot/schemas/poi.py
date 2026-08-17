@@ -26,6 +26,7 @@ class PoiCategory(StrEnum):
     HOTEL = "hotel"
     PHARMACY = "pharmacy"
     HOSPITAL = "hospital"
+    GYM = "gym"
     PARK = "park"
     BANK = "bank"
     ATM = "atm"
@@ -60,6 +61,12 @@ class Poi(CamelModel):
             "particular POI wasn't reachable by road from the origin."
         ),
     )
+    osm_type: str | None = Field(default=None, description="OSM element type: node, way, or relation")
+    osm_id: int | None = Field(default=None)
+    raw_tags: dict[str, str] = Field(
+        default_factory=dict, description="Every OSM tag on the element (name, brand, website, opening_hours, etc.)"
+    )
+    url: str | None = Field(default=None, description="Link to the raw element on openstreetmap.org")
 
 
 class _PoiTagFields(CamelModel):

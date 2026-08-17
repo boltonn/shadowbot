@@ -292,6 +292,14 @@ async def upload_point_dataset(
     return await point_dataset_repository.add_point_dataset(PointDatasetCreate(name=name, points=points))
 
 
+@router.post("/datasets/points/{dataset_id}/features")
+async def add_point_feature(
+    dataset_id: str, request: PointFeatureCreate, point_dataset_repository: PointDatasetDatastoreDep
+) -> PointFeature:
+    """Add a single feature to an existing point dataset."""
+    return await point_dataset_repository.add_feature(dataset_id, request)
+
+
 @router.patch("/datasets/points/{dataset_id}/features/{feature_id}")
 async def label_point_feature(
     dataset_id: str,
@@ -359,6 +367,14 @@ async def upload_polygon_dataset(
         raise HTTPException(status_code=422, detail=f"Invalid GeoJSON upload: {exc}") from exc
 
     return await polygon_dataset_repository.add_polygon_dataset(PolygonDatasetCreate(name=name, polygons=polygons))
+
+
+@router.post("/datasets/polygons/{dataset_id}/features")
+async def add_polygon_feature(
+    dataset_id: str, request: PolygonFeatureCreate, polygon_dataset_repository: PolygonDatasetDatastoreDep
+) -> PolygonFeature:
+    """Add a single feature to an existing polygon dataset."""
+    return await polygon_dataset_repository.add_feature(dataset_id, request)
 
 
 @router.patch("/datasets/polygons/{dataset_id}/features/{feature_id}")

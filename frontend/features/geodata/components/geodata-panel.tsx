@@ -1,7 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronRight, Download, MapIcon, Route as RouteIcon, Shapes, Square, Table2, Trash2, Upload } from "lucide-react";
+import { Suspense, useState } from "react";
+import {
+  ChevronRight,
+  Download,
+  MapIcon,
+  PenTool,
+  Plus,
+  Route as RouteIcon,
+  Shapes,
+  Square,
+  Table2,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -20,7 +33,9 @@ import { usePreviewTabularPoints } from "@/features/geodata/hooks/use-preview-ta
 import { useUploadPointDataset } from "@/features/geodata/hooks/use-upload-point-dataset";
 import { useUploadPolygonDataset } from "@/features/geodata/hooks/use-upload-polygon-dataset";
 import { useUploadTrack } from "@/features/geodata/hooks/use-upload-track";
-import { colorForCategory, KNOWN_CATEGORIES } from "@/features/geodata/lib/category-icons";
+import { CategoryDot } from "@/features/geodata/components/category-dot";
+import { LiveResultsPanel } from "@/features/geodata/components/live-results-panel";
+import { KNOWN_CATEGORIES } from "@/features/geodata/lib/category-icons";
 import type { Dataset, DatasetGeometryKind, TabularPreview } from "@/features/geodata/types";
 import { useMapStore } from "@/features/map/store";
 import { cn } from "@/lib/utils";
@@ -107,7 +122,7 @@ function CategoryChip({
       render={<button type="button" onClick={() => onSelect(category)} />}
       className={cn("gap-1.5 text-[10px]", selected ? "border-ring text-foreground" : "text-muted-foreground")}
     >
-      <span className={cn("size-1.5 rounded-full", colorForCategory(category).replace("text-", "bg-"))} />
+      <CategoryDot category={category} />
       {category}
     </Badge>
   );
@@ -441,38 +456,41 @@ function PointUploadForm() {
   );
 }
 
-function DatasetTableDialog({ dataset }: { dataset: Dataset }) {
-  const [open, setOpen] = useState(false);
-  const { data: detail } = useDatasetDetail(dataset.id, open);
+/**
+ * The big, focused surface for working with a dataset's rows — this is the core of the
+ * data view, so it gets most of the viewport rather than being squeezed into the sidebar.
+ * The map stays visible behind the overlay since row clicks (via DatasetTable) sync
+ * selection/pan onto it.
+ */
+function DatasetTableDialog({
+  dataset,
+  open,
+  onOpenChange,
+}: {
+  dataset: Dataset | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { data: detail } = useDatasetDetail(dataset?.id ?? "", open && dataset !== null);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        className="rounded-none"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen(true);
-        }}
-        aria-label="View raw data"
-      >
-        <Table2 className="size-3.5" />
-      </Button>
-      <DialogContent className="flex max-h-[85vh] w-full max-w-4xl flex-col sm:max-w-4xl">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[85vh] max-h-[85vh] w-[95vw] max-w-6xl flex-col sm:max-w-6xl">
         <DialogHeader>
-          <DialogTitle>{dataset.name}</DialogTitle>
+          <DialogTitle>{dataset?.name}</DialogTitle>
         </DialogHeader>
-        {detail ? <DatasetTable dataset={detail} /> : <p className="text-sm text-muted-foreground">Loading...</p>}
+        <div className="flex min-h-0 flex-1 flex-col">
+          {detail ? <DatasetTable dataset={detail} /> : <p className="text-sm text-muted-foreground">Loading...</p>}
+        </div>
       </DialogContent>
     </Dialog>
   );
 }
 
-function DatasetRow({ dataset }: { dataset: Dataset }) {
+function DatasetRow({ dataset, onView }: { dataset: Dataset; onView: () => void }) {
   const visibleDatasetIds = useMapStore((state) => state.visibleDatasetIds);
   const toggleDatasetVisibility = useMapStore((state) => state.toggleDatasetVisibility);
+  const setDrawFeatureMode = useMapStore((state) => state.setDrawFeatureMode);
   const downloadDataset = useDownloadDataset();
   const isVisible = visibleDatasetIds.includes(dataset.id);
   const Icon = KIND_ICONS[dataset.geometryKind];
@@ -493,7 +511,40 @@ function DatasetRow({ dataset }: { dataset: Dataset }) {
             {dataset.geometryKind === "track" && ` · ${formatDate(dataset.dateStart)}`}
           </span>
         </button>
-        <DatasetTableDialog dataset={dataset} />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="rounded-none"
+          onClick={onView}
+          aria-label="View data"
+        >
+          <Table2 className="size-3.5" />
+        </Button>
+        {dataset.geometryKind === "point" && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="rounded-none"
+            onClick={() => setDrawFeatureMode({ datasetId: dataset.id, kind: "point" })}
+            aria-label="Add point"
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        )}
+        {dataset.geometryKind === "polygon" && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="rounded-none"
+            onClick={() => setDrawFeatureMode({ datasetId: dataset.id, kind: "polygon" })}
+            aria-label="Draw polygon"
+          >
+            <PenTool className="size-3.5" />
+          </Button>
+        )}
         <Button
           type="button"
           variant="ghost"
@@ -509,7 +560,7 @@ function DatasetRow({ dataset }: { dataset: Dataset }) {
         <div className="mt-1.5 flex flex-wrap gap-1 pl-9">
           {dataset.categories.map((category) => (
             <Badge key={category} variant="outline" className="gap-1.5 text-[10px]">
-              <span className={cn("size-1.5 rounded-full", colorForCategory(category).replace("text-", "bg-"))} />
+              <CategoryDot category={category} />
               {category}
             </Badge>
           ))}
@@ -520,13 +571,21 @@ function DatasetRow({ dataset }: { dataset: Dataset }) {
           ))}
         </div>
       )}
-      {dataset.geometryKind === "track" && isVisible && <TrackTimeSlider trackId={dataset.id} />}
+      {dataset.geometryKind === "track" && isVisible && (
+        <ErrorBoundary fallback={null}>
+          <Suspense fallback={null}>
+            <TrackTimeSlider trackId={dataset.id} />
+          </Suspense>
+        </ErrorBoundary>
+      )}
     </li>
   );
 }
 
 function DatasetList() {
   const datasetsQuery = useDatasets({ limit: 100 });
+  const [viewingDatasetId, setViewingDatasetId] = useState<string | null>(null);
+  const viewingDataset = datasetsQuery.data?.data.find((dataset) => dataset.id === viewingDatasetId) ?? null;
 
   return (
     <div className="flex flex-col gap-1">
@@ -537,9 +596,14 @@ function DatasetList() {
       )}
       <ul className="flex flex-col">
         {datasetsQuery.data?.data.map((dataset) => (
-          <DatasetRow key={dataset.id} dataset={dataset} />
+          <DatasetRow key={dataset.id} dataset={dataset} onView={() => setViewingDatasetId(dataset.id)} />
         ))}
       </ul>
+      <DatasetTableDialog
+        dataset={viewingDataset}
+        open={viewingDataset !== null}
+        onOpenChange={(open) => !open && setViewingDatasetId(null)}
+      />
     </div>
   );
 }
@@ -556,6 +620,7 @@ export function GeodataPanel() {
         </TabsList>
         <TabsContent value="browse" className="mt-4">
           <div className="flex flex-col gap-4">
+            <LiveResultsPanel />
             <AreaSelectToolbar />
             <Separator />
             <DatasetList />

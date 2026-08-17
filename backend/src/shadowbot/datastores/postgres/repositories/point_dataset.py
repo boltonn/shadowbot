@@ -17,6 +17,7 @@ from shadowbot.schemas.point_dataset import (
     PointDatasetDetail,
     PointDatasetsRequest,
     PointFeature,
+    PointFeatureCreate,
     PointFeatureOnRoute,
 )
 from shadowbot.schemas.routing import Route
@@ -142,6 +143,29 @@ class PostgresPointDatasetRepository:
 
         results.sort(key=lambda point: point.distance_m)
         return results[: request.limit]
+
+    async def add_feature(self, dataset_id: str, request: PointFeatureCreate) -> PointFeature:
+        """Add a single feature to an existing point dataset."""
+        feature = PointDatasetFeatureTable(
+            id=str(uuid4()),
+            dataset_id=dataset_id,
+            geom=point_to_geom(request.geometry),
+            category=request.category,
+            name=request.name,
+            tags=request.tags,
+            properties=request.properties,
+        )
+        self.session.add(feature)
+        await self.session.commit()
+        return PointFeature(
+            id=feature.id,
+            dataset_id=feature.dataset_id,
+            geometry=geom_to_point(feature.geom),
+            category=feature.category,
+            name=feature.name,
+            tags=feature.tags,
+            properties=feature.properties,
+        )
 
     async def label_feature(self, dataset_id: str, feature_id: str, request: LabelFeatureRequest) -> PointFeature:
         """Update a point feature's category, name, and tags."""

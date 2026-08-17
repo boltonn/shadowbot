@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { labelPointFeature, labelPolygonFeature, labelTrackPoint } from "@/features/geodata/api";
+import { datasetKeys } from "@/features/geodata/query-keys";
 import type { LabelFeatureRequest, LabelTrackPointRequest, PointFeature, PolygonFeature } from "@/features/geodata/types";
 
 /** Label a point or polygon feature's category, name, and tags. */
@@ -22,7 +23,7 @@ export function useLabelFeature(geometryKind: "point" | "polygon") {
       body: LabelFeatureRequest;
     }) => labelFn(datasetId, featureId, body),
     onSuccess: (_data, { datasetId }) => {
-      queryClient.invalidateQueries({ queryKey: ["datasets", datasetId] });
+      queryClient.invalidateQueries({ queryKey: datasetKeys.detail(datasetId) });
     },
   });
 }
@@ -42,7 +43,7 @@ export function useLabelTrackPoint() {
       body: LabelTrackPointRequest;
     }) => labelTrackPoint(trackId, pointId, body),
     onSuccess: (_data, { trackId }) => {
-      queryClient.invalidateQueries({ queryKey: ["datasets", trackId] });
+      queryClient.invalidateQueries({ queryKey: datasetKeys.detail(trackId) });
     },
   });
 }

@@ -16,7 +16,14 @@ from shapely.geometry.base import BaseGeometry
 
 from shadowbot.datastores.networkx.config import NetworkXRoutingConfig
 from shadowbot.datastores.networkx.graph_cache import get_graph_for_points
-from shadowbot.datastores.networkx.osm_tags import infer_category, merged_tags, tag_entries
+from shadowbot.datastores.networkx.osm_tags import (
+    element_identity,
+    infer_category,
+    merged_tags,
+    osm_url,
+    raw_tags,
+    tag_entries,
+)
 from shadowbot.integrations.overpass import OverpassClient
 from shadowbot.schemas.poi import OsmTag, PoiCategory
 from shadowbot.schemas.routing import AreaMatch, NetworkType, Route
@@ -52,9 +59,10 @@ def _cluster_count(points: list[ShapelyPoint], radius_deg: float) -> int:
 class AreaFeatureFinder:
     """Finds tagged area features intersecting a route corridor and estimates size/exit count."""
 
-    def __init__(self, config: NetworkXRoutingConfig, overpass_client: OverpassClient):
+    def __init__(self, config: NetworkXRoutingConfig, overpass_client: OverpassClient, osm_website_url: str):
         self.config = config
         self.overpass_client = overpass_client
+        self.osm_website_url = osm_website_url
 
     async def find_along_route(
         self, route: Route, categories: list[PoiCategory], raw_tags: list[OsmTag], corridor_m: float
@@ -74,12 +82,13 @@ class AreaFeatureFinder:
             return []
 
         matches = []
-        for _, row in features.iterrows():
+        for index, row in features.iterrows():
             geometry = row.geometry
             if geometry.geom_type not in {"Polygon", "MultiPolygon"} or not geometry.intersects(route_line):
                 continue
             outline = geometry if geometry.geom_type == "Polygon" else geometry.convex_hull
             name = row.get("name")
+            element_type, osm_id = element_identity(index)
             matches.append(
                 AreaMatch(
                     name=name if isinstance(name, str) else None,
@@ -87,6 +96,10 @@ class AreaFeatureFinder:
                     geometry=GeoPolygon(**mapping(outline)),
                     area_m2=self._area_m2(geometry),
                     exit_count=self._exit_count(geometry),
+                    osm_type=element_type,
+                    osm_id=osm_id,
+                    raw_tags=raw_tags(row),
+                    url=osm_url(self.osm_website_url, element_type, osm_id),
                 )
             )
         return matches

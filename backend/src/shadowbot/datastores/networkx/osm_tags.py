@@ -4,6 +4,9 @@ import pandas as pd
 
 from shadowbot.schemas.poi import OsmTag, PoiCategory
 
+# Columns osmnx attaches that aren't OSM tags — geometry/way-member bookkeeping, not the raw element.
+_NON_TAG_COLUMNS = {"geometry", "nodes", "ways"}
+
 # Each category maps to exactly one (osm_key, osm_value) pair — kept single-valued so a result
 # row can be matched back to the category that found it (see infer_category).
 CATEGORY_TAGS: dict[PoiCategory, tuple[str, str]] = {
@@ -17,6 +20,7 @@ CATEGORY_TAGS: dict[PoiCategory, tuple[str, str]] = {
     PoiCategory.HOTEL: ("tourism", "hotel"),
     PoiCategory.PHARMACY: ("amenity", "pharmacy"),
     PoiCategory.HOSPITAL: ("amenity", "hospital"),
+    PoiCategory.GYM: ("leisure", "fitness_centre"),
     PoiCategory.PARK: ("leisure", "park"),
     PoiCategory.BANK: ("amenity", "bank"),
     PoiCategory.ATM: ("amenity", "atm"),
@@ -50,3 +54,35 @@ def infer_category(row: pd.Series, entries: list[TagEntry]) -> PoiCategory | str
         if row.get(key) == value:
             return label
     return entries[0][2]
+
+
+def element_identity(index: object) -> tuple[str | None, int | None]:
+    """osmnx indexes query results by (element_type, osmid) — pull that back out, if present."""
+    if not isinstance(index, tuple):
+        return None, None
+    element_type, osm_id = index
+    return element_type, (int(osm_id) if osm_id is not None else None)
+
+
+def osm_url(base_url: str, osm_type: str | None, osm_id: int | None) -> str | None:
+    """Link to the raw node/way/relation page — base_url is deployment-configurable (OverpassConfig.osm_website_url)."""
+    return f"{base_url.rstrip('/')}/{osm_type}/{osm_id}" if osm_type and osm_id is not None else None
+
+
+def raw_tags(row: pd.Series) -> dict[str, str]:
+    """Every OSM tag on the element (amenity, name, brand, website, opening_hours, ...).
+
+    osmnx occasionally represents a repeated tag (e.g. multiple `nodes` per ring) as a list
+    rather than a scalar — those are joined rather than passed to pd.notna, which doesn't
+    accept array-likes.
+    """
+    tags: dict[str, str] = {}
+    for key, value in row.items():
+        if key in _NON_TAG_COLUMNS:
+            continue
+        if isinstance(value, list):
+            if value:
+                tags[str(key)] = ", ".join(str(item) for item in value)
+        elif pd.notna(value):
+            tags[str(key)] = str(value)
+    return tags

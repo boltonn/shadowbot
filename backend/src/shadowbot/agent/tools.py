@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+import httpx
+from geojson_pydantic import Point
 from pydantic_ai import ModelRetry, RunContext
 
 from shadowbot.analytics.frequented_locations import apply_location_labels, compute_frequented_locations
@@ -14,8 +16,11 @@ from shadowbot.datastores.postgres.repositories.point_dataset import PostgresPoi
 from shadowbot.datastores.postgres.repositories.polygon_dataset import PostgresPolygonDatasetRepository
 from shadowbot.datastores.postgres.repositories.route import PostgresRouteRepository
 from shadowbot.datastores.postgres.repositories.track import PostgresTrackRepository
+from shadowbot.datastores.valhalla.coverage import is_within_coverage
+from shadowbot.integrations.github import build_coverage_issue_url
 from shadowbot.integrations.nominatim import NominatimClient
 from shadowbot.schemas.location_label import LocationLabel, LocationLabelCreate
+from shadowbot.schemas.map_location import UpdateMapLocationsRequest
 from shadowbot.schemas.poi import NearbyPoiRequest, Poi, RoutePoiRequest
 from shadowbot.schemas.point_dataset import (
     PointDataset,
@@ -35,6 +40,7 @@ from shadowbot.schemas.routing import (
     Route,
     RouteComparison,
     RouteRequest,
+    RoutingCoverage,
     RouteSearchCriteria,
     RouteSearchMatch,
 )
@@ -61,11 +67,54 @@ class AgentDeps:
     point_datasets: PostgresPointDatasetRepository
     polygon_datasets: PostgresPolygonDatasetRepository
     location_labels: PostgresLocationLabelRepository
+    coverage: RoutingCoverage
+    github_repo: str
+
+
+def _coverage_gap_message(exc: Exception, point: Point, ctx: RunContext[AgentDeps]) -> str:
+    """Turn a routing-engine failure into a ModelRetry message the model can actually act on.
+
+    Distinguishes "this point is outside every compiled region" (the common, explainable
+    case) from a genuine routing failure inside a covered region (disconnected road,
+    identical origin/destination, etc.), so the model doesn't misdiagnose the latter as a
+    coverage gap.
+    """
+    coverage = ctx.deps.coverage
+    if coverage.backend == "valhalla" and not is_within_coverage(point, coverage.regions):
+        covered_areas = ", ".join(r.name for r in coverage.regions) or "none yet"
+        issue_url = build_coverage_issue_url(repo=ctx.deps.github_repo, point=point)
+        return (
+            f"No route could be computed ({exc}) — the point {point.coordinates} falls outside every region "
+            f"this deployment has fast, pre-compiled routing for (currently: {covered_areas}). Tell the user "
+            "routing isn't available there yet, and suggest they request it via this markdown link "
+            f"(share it as-is): [request routing coverage here]({issue_url})"
+        )
+    return (
+        f"No route could be computed ({exc}), even though the point falls within this deployment's compiled "
+        "coverage — this is likely a genuine routing issue (e.g. a disconnected road, or identical origin/"
+        "destination), not a missing region. Say routing failed for this specific request rather than blaming "
+        "missing coverage."
+    )
 
 
 async def geocode(ctx: RunContext[AgentDeps], query: str) -> list[GeocodeResult]:
-    """Resolve a free-text place name (e.g. 'Central Park') into coordinates."""
-    return await ctx.deps.geocoder.geocode(GeocodeRequest(query=query))
+    """Resolve a place name into coordinates via Nominatim's structured address search.
+
+    Format query as "<name>, <city>, <state/region>, <country>" — e.g. "Whole Foods
+    Market, Tysons, VA, USA" rather than "Whole Foods in Tysons, VA". Drop connector
+    words like "in"/"near"/"at" unless they're actually part of the name itself (e.g.
+    "The Standard at Columbia"). Always include the country when it's known or inferable
+    from context (the conversation so far, a prior geocode result, an existing route) —
+    Nominatim matches far less reliably without it, especially for chain/business names
+    that exist in multiple countries.
+    """
+    try:
+        return await ctx.deps.geocoder.geocode(GeocodeRequest(query=query))
+    except httpx.HTTPError as exc:
+        raise ModelRetry(
+            f"The geocoding service failed for {query!r} ({exc}). Wait a moment and try again, or tell "
+            "the user the geocoder is temporarily unavailable if it keeps failing."
+        ) from exc
 
 
 async def plan_route(ctx: RunContext[AgentDeps], request: RouteRequest) -> Route:
@@ -75,7 +124,10 @@ async def plan_route(ctx: RunContext[AgentDeps], request: RouteRequest) -> Route
     request.waypoints for a single continuous multi-stop route, rather than
     planning separate legs and stitching them together yourself.
     """
-    route = await ctx.deps.routing.compute_route(request)
+    try:
+        route = await ctx.deps.routing.compute_route(request)
+    except ValueError as exc:
+        raise ModelRetry(_coverage_gap_message(exc, request.destination, ctx)) from exc
     return await ctx.deps.routes.add_route(route)
 
 
@@ -106,8 +158,11 @@ async def reroute(ctx: RunContext[AgentDeps], route_id: str, request: RerouteReq
     """
     prior_route = await ctx.deps.routes.get_route_by_id(route_id)
     if prior_route is None:
-        raise ValueError(f"Route not found: {route_id}")
-    new_route = await ctx.deps.routing.compute_reroute(prior_route, request)
+        raise ModelRetry(f"No route found with id {route_id!r}. Double-check the id, or plan_route again if needed.")
+    try:
+        new_route = await ctx.deps.routing.compute_reroute(prior_route, request)
+    except ValueError as exc:
+        raise ModelRetry(_coverage_gap_message(exc, prior_route.destination, ctx)) from exc
     return await ctx.deps.routes.add_route(new_route)
 
 
@@ -120,9 +175,9 @@ async def compare_routes(ctx: RunContext[AgentDeps], route_id_a: str, route_id_b
     route_a = await ctx.deps.routes.get_route_by_id(route_id_a)
     route_b = await ctx.deps.routes.get_route_by_id(route_id_b)
     if route_a is None:
-        raise ValueError(f"Route not found: {route_id_a}")
+        raise ModelRetry(f"No route found with id {route_id_a!r}. Double-check the id, or plan_route again if needed.")
     if route_b is None:
-        raise ValueError(f"Route not found: {route_id_b}")
+        raise ModelRetry(f"No route found with id {route_id_b!r}. Double-check the id, or plan_route again if needed.")
     return await ctx.deps.routing.compare_routes(route_a, route_b)
 
 
@@ -146,7 +201,10 @@ async def get_isochrone(ctx: RunContext[AgentDeps], request: IsochroneRequest) -
     Use this for open-ended 'what's within N minutes of home' browsing, as opposed
     to routing to one specific already-known destination.
     """
-    return await ctx.deps.routing.compute_isochrone(request)
+    try:
+        return await ctx.deps.routing.compute_isochrone(request)
+    except ValueError as exc:
+        raise ModelRetry(_coverage_gap_message(exc, request.origin, ctx)) from exc
 
 
 async def find_nearby_poi(ctx: RunContext[AgentDeps], request: NearbyPoiRequest) -> list[Poi]:
@@ -217,7 +275,7 @@ async def match_track(ctx: RunContext[AgentDeps], track_id: str) -> MapMatchResu
     """
     track = await ctx.deps.tracks.get_track_by_id(track_id)
     if track is None:
-        raise ValueError(f"Track not found: {track_id}")
+        raise ModelRetry(f"No track found with id {track_id!r}. Call list_tracks to see valid ids.")
     if not ctx.deps.routing.supports_map_matching:
         raise ModelRetry(
             "Map matching requires the Valhalla routing backend, which isn't configured for this "
@@ -308,3 +366,69 @@ async def list_polygon_datasets(ctx: RunContext[AgentDeps]) -> list[PolygonDatas
     """List previously uploaded custom polygon datasets (e.g. school zones, restricted areas, boundaries)."""
     result = await ctx.deps.polygon_datasets.get_polygon_datasets(PolygonDatasetsRequest())
     return result.data
+
+
+async def update_map_locations(request: UpdateMapLocationsRequest) -> UpdateMapLocationsRequest:
+    """Control what location markers are currently shown on the user's map, alongside the chat.
+
+    This is the only way search results become visible on the map — geocode, find_nearby_poi,
+    find_poi_along_route, find_frequented_locations, find_point_dataset_along_route, and
+    save_location_label all return data to you, but plotting it is a separate, deliberate step
+    via this tool. Call it whenever a location-surfacing tool's results are worth showing:
+
+    - action="replace": clear everything currently on the map and show exactly `locations`
+      instead. Use this for a new search/topic change, or when the person's follow-on message
+      narrows or filters what should be shown (e.g. "just the ones open late" — call again with
+      only the matching subset).
+    - action="add": keep everything currently on the map and add `locations` on top of it. Use
+      when the new results complement what's already shown rather than replacing it.
+    - action="remove": keep everything except `remove_ids`. Use when the person asks to drop
+      specific results (e.g. "remove the one downtown", "take off the gas stations").
+
+    Assign each location a stable, human-legible `id` (e.g. a slug of its name) so you can refer
+    back to it in a later remove call.
+
+    Always fill in `properties` with whatever raw detail the source tool gave you (geocode's
+    osm_type/osm_id/osm_class/url/address; find_nearby_poi's/find_poi_along_route's osm_type/
+    osm_id/url/raw_tags; an AreaMatch's osm_type/osm_id/url/raw_tags from search_routes'
+    through_categories/through_raw_tags) — flatten nested fields to string key/value pairs. The
+    user can open a marker to inspect this, so don't summarize it away to just a name and a pin.
+
+    This tool is points only — `locations[].geometry` must be a Point, so plot an area feature
+    (e.g. a park matched via through_categories) at its centroid. Carrying its osm_type/osm_id
+    into `properties` still identifies the real polygon/relation behind that point, so later in
+    the conversation you (or the user) can refer back to that exact area by id rather than
+    re-searching by name. Planned routes are a different, already-automatic thing: plan_route/
+    reroute/search_routes results are drawn on the map on their own the moment you return them,
+    so never pass a route's LineString geometry here, and don't call this tool again just to
+    "add" a route you already planned.
+    """
+    return request
+
+
+async def get_routing_coverage(ctx: RunContext[AgentDeps]) -> RoutingCoverage:
+    """Which regions, if any, have fast, pre-compiled routing on this deployment.
+
+    Call this before confidently promising fast routing/POI results somewhere the person
+    hasn't already successfully routed within this conversation, or whenever they ask
+    directly whether an area is supported ("do you cover Seattle?"). backend='networkx'
+    means every request is routed live, everywhere, just slower — there's no notion of
+    covered regions in that mode. backend='valhalla' means routing is fast but only inside
+    `regions`; use suggest_coverage_request_url to offer requesting an area outside them.
+    """
+    return ctx.deps.coverage
+
+
+async def suggest_coverage_request_url(
+    ctx: RunContext[AgentDeps], place: str, point: Point | None = None
+) -> str:
+    """A ready-to-share link to request fast routing coverage for a place outside current regions.
+
+    Call this once you've told the person a location isn't within this deployment's compiled
+    coverage (via get_routing_coverage, or a routing/isochrone failure) and want to offer them
+    a concrete next step. Pass the place name they used, and its coordinates if you geocoded it.
+    Share the returned URL as-is, formatted as a markdown link (e.g. "[request coverage for
+    Seattle](<url>)") so it renders clickable — don't hand-build the URL yourself, since the
+    title/body encoding has to be exact.
+    """
+    return build_coverage_issue_url(repo=ctx.deps.github_repo, place=place, point=point)

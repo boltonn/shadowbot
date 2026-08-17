@@ -10,6 +10,7 @@ from shadowbot.schemas.point_dataset import (
     PointDatasetDetail,
     PointDatasetsRequest,
     PointFeature,
+    PointFeatureCreate,
 )
 
 
@@ -27,6 +28,10 @@ class PointDatasetRepository(ABC):
     @abstractmethod
     async def get_point_datasets(self, request: PointDatasetsRequest) -> PaginatedPointDatasetsResponse:
         """List point dataset summaries."""
+
+    @abstractmethod
+    async def add_feature(self, dataset_id: str, request: PointFeatureCreate) -> PointFeature:
+        """Add a single feature to an existing point dataset."""
 
     @abstractmethod
     async def label_feature(self, dataset_id: str, feature_id: str, request: LabelFeatureRequest) -> PointFeature:

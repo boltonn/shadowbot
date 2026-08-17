@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { FeatureCollection, Point } from "geojson";
 import * as MapLibreGL from "maplibre-gl";
 import type { GeoJSONSource, MapGeoJSONFeature, MapMouseEvent } from "maplibre-gl";
-import { MapMarker, MapPopup, MarkerContent, MarkerTooltip, useMap } from "@/components/ui/map";
-import { useDatasetDetail } from "@/features/geodata/hooks/use-dataset-detail";
-import type { PointDatasetDetail, PointFeature } from "@/features/geodata/types";
-import { categoryColorMatchExpression, colorForCategory, iconForCategory } from "@/features/geodata/lib/category-icons";
+import { MapMarker, MarkerContent, MarkerTooltip, useMap } from "@/components/ui/map";
+import { useSuspenseDatasetDetail } from "@/features/geodata/hooks/use-dataset-detail";
+import type { PointFeature } from "@/features/geodata/types";
+import { categoryColorMatchExpression, colorForCategory, FALLBACK_CATEGORY_COLOR, iconForCategory } from "@/features/geodata/lib/category-icons";
+import { useCategoryColorStore } from "@/features/geodata/category-color-store";
 import { fitToCoordinates } from "@/features/map/lib/fit-bounds";
 import { useMapStore } from "@/features/map/store";
 
@@ -23,18 +24,19 @@ const CLUSTER_MAX_ZOOM = 15;
 type PointProperties = { pointId: string; category: string; name: string | null };
 type CircleColorExpression = NonNullable<MapLibreGL.CircleLayerSpecification["paint"]>["circle-color"];
 
-function categoryColorExpression(categories: string[]): CircleColorExpression {
-  if (categories.length === 0) return "#8a9099" as CircleColorExpression;
-  return categoryColorMatchExpression(categories) as CircleColorExpression;
+function categoryColorExpression(categories: string[], overrides: Record<string, string>): CircleColorExpression {
+  if (categories.length === 0) return FALLBACK_CATEGORY_COLOR as CircleColorExpression;
+  return categoryColorMatchExpression(categories, overrides) as CircleColorExpression;
 }
 
 const EMPTY_FEATURE_COLLECTION: FeatureCollection<Point, PointProperties> = { type: "FeatureCollection", features: [] };
 
 export function PointDatasetLayer({ datasetId }: { datasetId: string }) {
   const { map } = useMap();
-  const { data } = useDatasetDetail(datasetId, true);
-  const dataset = data && data.geometryKind === "point" ? (data as PointDatasetDetail) : undefined;
+  const { data } = useSuspenseDatasetDetail(datasetId);
+  const dataset = data.geometryKind === "point" ? data : undefined;
   const filterSet = useMapStore((state) => state.filteredFeatureIds[datasetId]) ?? null;
+  const setSelectedFeature = useMapStore((state) => state.setSelectedFeature);
   const hasFitRef = useRef(false);
 
   useEffect(() => {
@@ -51,24 +53,49 @@ export function PointDatasetLayer({ datasetId }: { datasetId: string }) {
   const points = filterSet ? dataset.points.filter((point) => filterSet.has(point.id)) : dataset.points;
 
   if (points.length <= ICON_MODE_MAX_POINTS) {
-    return <PointDatasetIcons points={points} />;
+    return <PointDatasetIcons datasetId={datasetId} points={points} onSelect={setSelectedFeature} />;
   }
 
-  return <PointDatasetCluster datasetId={datasetId} points={points} categories={dataset.categories} />;
+  return (
+    <PointDatasetCluster
+      datasetId={datasetId}
+      points={points}
+      categories={dataset.categories}
+      onSelect={setSelectedFeature}
+    />
+  );
 }
 
+type SelectFeature = (feature: { datasetId: string; featureId: string }) => void;
+
 /** Small datasets: one icon marker per point, colored and shaped by category. */
-function PointDatasetIcons({ points }: { points: PointFeature[] }) {
+function PointDatasetIcons({
+  datasetId,
+  points,
+  onSelect,
+}: {
+  datasetId: string;
+  points: PointFeature[];
+  onSelect: SelectFeature;
+}) {
+  const overrides = useCategoryColorStore((state) => state.overrides);
+
   return (
     <>
       {points.map((point) => {
         const Icon = iconForCategory(point.category);
         const [longitude, latitude] = point.geometry.coordinates as [number, number];
         return (
-          <MapMarker key={point.id} longitude={longitude} latitude={latitude}>
+          <MapMarker
+            key={point.id}
+            longitude={longitude}
+            latitude={latitude}
+            onClick={() => onSelect({ datasetId, featureId: point.id })}
+          >
             <MarkerContent>
               <Icon
-                className={`${colorForCategory(point.category)} size-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]`}
+                className="size-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
+                style={{ color: colorForCategory(point.category, overrides) }}
                 strokeWidth={2.5}
               />
             </MarkerContent>
@@ -80,8 +107,6 @@ function PointDatasetIcons({ points }: { points: PointFeature[] }) {
   );
 }
 
-type OpenPopup = { longitude: number; latitude: number; name: string; category: string };
-
 /**
  * Large datasets: a native MapLibre clustered layer instead of one DOM marker
  * per point. Nearby points bundle into a count circle at low zoom; zooming in
@@ -92,13 +117,15 @@ function PointDatasetCluster({
   datasetId,
   points,
   categories,
+  onSelect,
 }: {
   datasetId: string;
   points: PointFeature[];
   categories: string[];
+  onSelect: SelectFeature;
 }) {
   const { map, isLoaded } = useMap();
-  const [openPopup, setOpenPopup] = useState<OpenPopup | null>(null);
+  const overrides = useCategoryColorStore((state) => state.overrides);
 
   const sourceId = `point-dataset-${datasetId}`;
   const clusterLayerId = `${sourceId}-clusters`;
@@ -163,7 +190,7 @@ function PointDatasetCluster({
       source: sourceId,
       filter: ["!", ["has", "point_count"]],
       paint: {
-        "circle-color": categoryColorExpression(categories),
+        "circle-color": categoryColorExpression(categories, overrides),
         "circle-radius": 6,
         "circle-stroke-width": 1.5,
         "circle-stroke-color": "#171717",
@@ -189,9 +216,9 @@ function PointDatasetCluster({
     const source = map.getSource(sourceId) as GeoJSONSource | undefined;
     source?.setData(data);
     if (map.getLayer(pointLayerId)) {
-      map.setPaintProperty(pointLayerId, "circle-color", categoryColorExpression(categories));
+      map.setPaintProperty(pointLayerId, "circle-color", categoryColorExpression(categories, overrides));
     }
-  }, [isLoaded, map, data, categories, sourceId, pointLayerId]);
+  }, [isLoaded, map, data, categories, overrides, sourceId, pointLayerId]);
 
   // Interactions: click a cluster to zoom into it, click a point to see its label.
   useEffect(() => {
@@ -209,9 +236,8 @@ function PointDatasetCluster({
     const handlePointClick = (e: MapMouseEvent & { features?: MapGeoJSONFeature[] }) => {
       const feature = e.features?.[0];
       if (!feature) return;
-      const [longitude, latitude] = (feature.geometry as Point).coordinates as [number, number];
-      const category = feature.properties?.category as string;
-      setOpenPopup({ longitude, latitude, name: (feature.properties?.name as string) || category, category });
+      const pointId = feature.properties?.pointId as string;
+      onSelect({ datasetId, featureId: pointId });
     };
 
     const setPointer = () => {
@@ -236,19 +262,7 @@ function PointDatasetCluster({
       map.off("mouseenter", pointLayerId, setPointer);
       map.off("mouseleave", pointLayerId, clearPointer);
     };
-  }, [isLoaded, map, sourceId, clusterLayerId, pointLayerId]);
+  }, [isLoaded, map, sourceId, clusterLayerId, pointLayerId, datasetId, onSelect]);
 
-  if (!openPopup) return null;
-
-  return (
-    <MapPopup
-      longitude={openPopup.longitude}
-      latitude={openPopup.latitude}
-      onClose={() => setOpenPopup(null)}
-      closeButton
-    >
-      <p className="text-sm font-medium">{openPopup.name}</p>
-      <p className="text-xs text-muted-foreground capitalize">{openPopup.category}</p>
-    </MapPopup>
-  );
+  return null;
 }

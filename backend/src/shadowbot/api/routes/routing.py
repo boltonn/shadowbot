@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from shadowbot.analytics.route_search import search_routes as compute_route_search
 from shadowbot.api.deps.area_features import AreaFeatureDatastoreDep
 from shadowbot.api.deps.postgres import RouteDatastoreDep
-from shadowbot.api.deps.routing import RoutingDatastoreDep
+from shadowbot.api.deps.routing import RoutingCoverageDep, RoutingDatastoreDep
 from shadowbot.api.settings import Settings
 from shadowbot.integrations.nominatim import NominatimClient
 from shadowbot.schemas.routing import (
@@ -18,13 +18,14 @@ from shadowbot.schemas.routing import (
     RouteCompareRequest,
     RouteComparison,
     RouteRequest,
+    RoutingCoverage,
     RouteSearchCriteria,
     RouteSearchMatch,
 )
 
 router = APIRouter(tags=["routing"])
 settings = Settings()
-nominatim_client = NominatimClient(config=settings.nominatim)
+nominatim_client = NominatimClient(config=settings.nominatim, osm_website_url=settings.osm_website_url)
 
 
 @router.post("/geocode")
@@ -104,3 +105,9 @@ async def estimate_arrival(
 async def isochrone(request: IsochroneRequest, routing: RoutingDatastoreDep) -> Isochrone:
     """Compute the area reachable from a point within a time budget, over the real road network."""
     return await routing.compute_isochrone(request)
+
+
+@router.get("/routing/coverage")
+async def get_coverage(coverage: RoutingCoverageDep) -> RoutingCoverage:
+    """Which regions, if any, have fast pre-compiled Valhalla routing on this deployment."""
+    return coverage

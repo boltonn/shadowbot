@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { bulkTagPointFeatures, bulkTagPolygonFeatures, bulkTagTrackPoints } from "@/features/geodata/api";
+import { datasetKeys } from "@/features/geodata/query-keys";
 import type { BulkTagRequest, DatasetGeometryKind, PointFeature, PolygonFeature, TrackPoint } from "@/features/geodata/types";
 
 type BulkTagResult = PointFeature[] | PolygonFeature[] | TrackPoint[];
@@ -17,7 +18,7 @@ export function useBulkTagFeatures(geometryKind: DatasetGeometryKind) {
   return useMutation<BulkTagResult, Error, { datasetId: string; body: BulkTagRequest }>({
     mutationFn: ({ datasetId, body }) => bulkTagFn(datasetId, body),
     onSuccess: (_data, { datasetId }) => {
-      queryClient.invalidateQueries({ queryKey: ["datasets", datasetId] });
+      queryClient.invalidateQueries({ queryKey: datasetKeys.detail(datasetId) });
     },
   });
 }

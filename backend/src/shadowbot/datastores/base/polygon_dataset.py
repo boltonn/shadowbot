@@ -10,6 +10,7 @@ from shadowbot.schemas.polygon_dataset import (
     PolygonDatasetDetail,
     PolygonDatasetsRequest,
     PolygonFeature,
+    PolygonFeatureCreate,
 )
 
 
@@ -27,6 +28,10 @@ class PolygonDatasetRepository(ABC):
     @abstractmethod
     async def get_polygon_datasets(self, request: PolygonDatasetsRequest) -> PaginatedPolygonDatasetsResponse:
         """List polygon dataset summaries."""
+
+    @abstractmethod
+    async def add_feature(self, dataset_id: str, request: PolygonFeatureCreate) -> PolygonFeature:
+        """Add a single feature to an existing polygon dataset."""
 
     @abstractmethod
     async def label_feature(self, dataset_id: str, feature_id: str, request: LabelFeatureRequest) -> PolygonFeature:

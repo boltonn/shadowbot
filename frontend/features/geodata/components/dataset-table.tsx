@@ -21,6 +21,7 @@ import { useBulkTagFeatures } from "@/features/geodata/hooks/use-bulk-tag-featur
 import { useLabelFeature, useLabelTrackPoint } from "@/features/geodata/hooks/use-label-feature";
 import type { DatasetDetail, PointFeature, PolygonFeature } from "@/features/geodata/types";
 import { useMapStore } from "@/features/map/store";
+import { cn } from "@/lib/utils";
 
 function parseTags(value: string): string[] {
   return value
@@ -93,10 +94,14 @@ function VirtualizedTable<TData>({
   table,
   selectedIds,
   toggleRow,
+  inspectedId,
+  onInspect,
 }: {
   table: ReactTableInstance<TData>;
   selectedIds: Set<string>;
   toggleRow: (id: string) => void;
+  inspectedId: string | null;
+  onInspect: (id: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rows = table.getRowModel().rows;
@@ -139,9 +144,13 @@ function VirtualizedTable<TData>({
                   height: virtualRow.size,
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                className="flex items-center border-b border-border last:border-b-0"
+                className={cn(
+                  "flex cursor-pointer items-center border-b border-border last:border-b-0 hover:bg-muted/30",
+                  inspectedId === row.id && "bg-signal/10",
+                )}
+                onClick={() => onInspect(row.id)}
               >
-                <td className="flex w-8 shrink-0 justify-center px-2">
+                <td className="flex w-8 shrink-0 justify-center px-2" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={selectedIds.has(row.id)}
@@ -243,13 +252,31 @@ function isNumericColumn(rows: FeatureRow[], key: string): boolean {
   return sawValue;
 }
 
+/** Selecting a row also brings its dataset onto the map, if it isn't shown there already. */
+function useInspectRow(datasetId: string) {
+  const selectedFeature = useMapStore((state) => state.selectedFeature);
+  const setSelectedFeature = useMapStore((state) => state.setSelectedFeature);
+  const visibleDatasetIds = useMapStore((state) => state.visibleDatasetIds);
+  const toggleDatasetVisibility = useMapStore((state) => state.toggleDatasetVisibility);
+
+  const inspectedId = selectedFeature?.datasetId === datasetId ? selectedFeature.featureId : null;
+  const onInspect = (featureId: string) => {
+    setSelectedFeature({ datasetId, featureId });
+    if (!visibleDatasetIds.includes(datasetId)) toggleDatasetVisibility(datasetId);
+  };
+  return { inspectedId, onInspect };
+}
+
 function FeaturesTable({ dataset }: { dataset: Extract<DatasetDetail, { geometryKind: "point" | "polygon" }> }) {
   const labelFeature = useLabelFeature(dataset.geometryKind === "polygon" ? "polygon" : "point");
   const bulkTag = useBulkTagFeatures(dataset.geometryKind);
   const setFilteredFeatureIds = useMapStore((state) => state.setFilteredFeatureIds);
-  const isPointDataset = dataset.geometryKind === "point";
+  const { inspectedId, onInspect } = useInspectRow(dataset.id);
 
-  const features = (isPointDataset ? dataset.points : dataset.polygons) as (PointFeature | PolygonFeature)[];
+  const features = (dataset.geometryKind === "point" ? dataset.points : dataset.polygons) as (
+    | PointFeature
+    | PolygonFeature
+  )[];
 
   const rows = useMemo<FeatureRow[]>(
     () =>
@@ -389,11 +416,10 @@ function FeaturesTable({ dataset }: { dataset: Extract<DatasetDetail, { geometry
   );
 
   useEffect(() => {
-    if (!isPointDataset) return;
     setFilteredFeatureIds(dataset.id, columnFilters.length > 0 ? new Set(filteredIds) : null);
     return () => setFilteredFeatureIds(dataset.id, null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPointDataset, dataset.id, columnFilters.length, filteredIds]);
+  }, [dataset.id, columnFilters.length, filteredIds]);
 
   const allTags = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.tags))).sort(), [rows]);
 
@@ -420,7 +446,13 @@ function FeaturesTable({ dataset }: { dataset: Extract<DatasetDetail, { geometry
         setBulkTagInput={setBulkTagInput}
         onApply={applyBulkTag}
       />
-      <VirtualizedTable table={table} selectedIds={selectedIds} toggleRow={toggleRow} />
+      <VirtualizedTable
+        table={table}
+        selectedIds={selectedIds}
+        toggleRow={toggleRow}
+        inspectedId={inspectedId}
+        onInspect={onInspect}
+      />
     </div>
   );
 }
@@ -438,6 +470,8 @@ type TrackRow = {
 function TrackTable({ dataset }: { dataset: Extract<DatasetDetail, { geometryKind: "track" }> }) {
   const labelTrackPoint = useLabelTrackPoint();
   const bulkTag = useBulkTagFeatures("track");
+  const setFilteredFeatureIds = useMapStore((state) => state.setFilteredFeatureIds);
+  const { inspectedId, onInspect } = useInspectRow(dataset.id);
 
   const rows = useMemo<TrackRow[]>(
     () =>
@@ -526,6 +560,18 @@ function TrackTable({ dataset }: { dataset: Extract<DatasetDetail, { geometryKin
     getRowId: (row) => row.id,
   });
 
+  const filteredIds = useMemo(
+    () => table.getFilteredRowModel().rows.map((row) => row.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, columnFilters],
+  );
+
+  useEffect(() => {
+    setFilteredFeatureIds(dataset.id, columnFilters.length > 0 ? new Set(filteredIds) : null);
+    return () => setFilteredFeatureIds(dataset.id, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataset.id, columnFilters.length, filteredIds]);
+
   const allTags = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.tags))).sort(), [rows]);
 
   const applyBulkTag = (mode: "add" | "remove") => {
@@ -551,7 +597,13 @@ function TrackTable({ dataset }: { dataset: Extract<DatasetDetail, { geometryKin
         setBulkTagInput={setBulkTagInput}
         onApply={applyBulkTag}
       />
-      <VirtualizedTable table={table} selectedIds={selectedIds} toggleRow={toggleRow} />
+      <VirtualizedTable
+        table={table}
+        selectedIds={selectedIds}
+        toggleRow={toggleRow}
+        inspectedId={inspectedId}
+        onInspect={onInspect}
+      />
     </div>
   );
 }

@@ -11,7 +11,15 @@ from shapely.geometry import Point as ShapelyPoint, Polygon, shape
 from shapely.geometry.base import BaseGeometry
 
 from shadowbot.datastores.networkx.config import NetworkXRoutingConfig
-from shadowbot.datastores.networkx.osm_tags import TagEntry, infer_category, merged_tags, tag_entries
+from shadowbot.datastores.networkx.osm_tags import (
+    TagEntry,
+    element_identity,
+    infer_category,
+    merged_tags,
+    osm_url,
+    raw_tags,
+    tag_entries,
+)
 from shadowbot.integrations.overpass import OverpassClient
 from shadowbot.schemas.poi import NearbyPoiRequest, Poi, RoutePoiRequest
 from shadowbot.schemas.routing import Route
@@ -24,9 +32,10 @@ _METERS_PER_DEGREE = 111_320
 class PoiRepository:
     """Finds points of interest near a location or along a route via Overpass tag search."""
 
-    def __init__(self, config: NetworkXRoutingConfig, overpass_client: OverpassClient):
+    def __init__(self, config: NetworkXRoutingConfig, overpass_client: OverpassClient, osm_website_url: str):
         self.config = config
         self.overpass_client = overpass_client
+        self.osm_website_url = osm_website_url
 
     async def find_near_point(self, request: NearbyPoiRequest) -> list[Poi]:
         """Find the nearest POIs of one or more categories within a radius of a point."""
@@ -91,10 +100,11 @@ class PoiRepository:
                 return []
 
         pois = []
-        for _, row in features.iterrows():
+        for index, row in features.iterrows():
             centroid = row.geometry.centroid
             distance_m = reference_geom.distance(centroid) * _METERS_PER_DEGREE
             name = row.get("name")
+            element_type, osm_id = element_identity(index)
             pois.append(
                 Poi(
                     name=name if isinstance(name, str) else None,
@@ -103,6 +113,10 @@ class PoiRepository:
                         type="Point", coordinates=Position2D(longitude=float(centroid.x), latitude=float(centroid.y))
                     ),
                     distance_m=distance_m,
+                    osm_type=element_type,
+                    osm_id=osm_id,
+                    raw_tags=raw_tags(row),
+                    url=osm_url(self.osm_website_url, element_type, osm_id),
                 )
             )
         pois.sort(key=lambda poi: poi.distance_m)

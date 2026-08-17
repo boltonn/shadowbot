@@ -15,6 +15,7 @@ from shadowbot.schemas.polygon_dataset import (
     PolygonDatasetDetail,
     PolygonDatasetsRequest,
     PolygonFeature,
+    PolygonFeatureCreate,
 )
 
 
@@ -111,6 +112,27 @@ class PostgresPolygonDatasetRepository:
         total_pages = (total_count + request.limit - 1) // request.limit
         return PaginatedPolygonDatasetsResponse(
             total=total_count, page=request.page, limit=request.limit, total_pages=total_pages, data=datasets
+        )
+
+    async def add_feature(self, dataset_id: str, request: PolygonFeatureCreate) -> PolygonFeature:
+        """Add a single feature to an existing polygon dataset."""
+        feature = PolygonDatasetFeatureTable(
+            id=str(uuid4()),
+            dataset_id=dataset_id,
+            geom=polygon_to_geom(request.geometry),
+            category=request.category,
+            name=request.name,
+            tags=request.tags,
+        )
+        self.session.add(feature)
+        await self.session.commit()
+        return PolygonFeature(
+            id=feature.id,
+            dataset_id=feature.dataset_id,
+            geometry=geom_to_polygon(feature.geom),
+            category=feature.category,
+            name=feature.name,
+            tags=feature.tags,
         )
 
     async def label_feature(self, dataset_id: str, feature_id: str, request: LabelFeatureRequest) -> PolygonFeature:

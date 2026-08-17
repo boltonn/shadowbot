@@ -48,6 +48,12 @@ export type PolygonDatasetDetail = Defined<Omit<components["schemas"]["PolygonDa
 export type DatasetDetail = PointDatasetDetail | TrackDetail | PolygonDatasetDetail;
 
 // Request types keep their natural optionality (defaulted fields may genuinely be omitted).
+export type PointFeatureCreate = Omit<components["schemas"]["PointFeatureCreate"], "geometry"> & { geometry: Point };
+
+export type PolygonFeatureCreate = Omit<components["schemas"]["PolygonFeatureCreate"], "geometry"> & {
+  geometry: Polygon;
+};
+
 export type LabelFeatureRequest = components["schemas"]["LabelFeatureRequest"];
 
 export type LabelTrackPointRequest = components["schemas"]["LabelTrackPointRequest"];

@@ -4,14 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import type { Polygon } from "geojson";
 import type { MapMouseEvent } from "maplibre-gl";
 import { MapGeoJSON, useMap } from "@/components/ui/map";
-import { MapDraw, type DrawGeometryType } from "@/components/ui/map-draw";
+import { MapDraw, type DrawGeometryType, type DrawMode, type DrawnFeature } from "@/components/ui/map-draw";
 import { useMapStore } from "@/features/map/store";
 import { bboxPolygon } from "@/lib/geo";
 
-// Only used so terra-draw's select mode knows how to configure resize flags for
-// `properties.mode: "rectangle"` features — `mode` passed to MapDraw below never
-// activates draw-mode "rectangle" itself (see the file doc comment for why).
-const EDITABLE_MODES: DrawGeometryType[] = ["rectangle"];
+// terra-draw only reliably drives pointer interaction for one mounted instance per map (see
+// MapDraw's own doc comment), so this single instance is shared by two independent drawing
+// sessions — the rectangle area filter and dataset-polygon creation — multiplexed via each
+// feature's `properties.mode`.
+const DRAW_MODES: DrawGeometryType[] = ["rectangle", "polygon"];
 
 type Drag = { start: [number, number]; current: [number, number] };
 
@@ -23,6 +24,10 @@ type Drag = { start: [number, number]; current: [number, number] };
  * never calls them from real pointer events). Editing an existing rectangle afterward (drag a
  * corner to resize) goes through terra-draw's select mode instead, which — being a drag that
  * starts on an existing feature's vertex rather than empty space — works correctly.
+ *
+ * Drawing a new dataset polygon, by contrast, uses terra-draw's own polygon draw mode directly
+ * (click to place vertices, double-click/click-first-point to close) — that interaction works
+ * fine through the adapter, unlike the rectangle drag gesture.
  */
 export function AreaSelectLayer() {
   const { map } = useMap();
@@ -30,6 +35,9 @@ export function AreaSelectLayer() {
   const setAreaSelectDrawMode = useMapStore((state) => state.setAreaSelectDrawMode);
   const selectedArea = useMapStore((state) => state.selectedArea);
   const setSelectedArea = useMapStore((state) => state.setSelectedArea);
+  const drawFeatureMode = useMapStore((state) => state.drawFeatureMode);
+  const pendingFeatureDraft = useMapStore((state) => state.pendingFeatureDraft);
+  const setPendingFeatureDraft = useMapStore((state) => state.setPendingFeatureDraft);
   const [drag, setDrag] = useState<Drag | null>(null);
   // setSelectedArea (a Zustand store write) must never happen inside a React state
   // updater function — updaters can run outside the normal commit timing, which is
@@ -37,6 +45,11 @@ export function AreaSelectLayer() {
   // component" here. Track the live drag value in a ref instead, and only call
   // setSelectedArea as a plain top-level statement in the mouseup handler.
   const dragRef = useRef<Drag | null>(null);
+
+  const [polygonDraft, setPolygonDraft] = useState<DrawnFeature<Polygon> | null>(null);
+  // MapDraw's onFinish can fire in the same synchronous callback chain as the onChange that
+  // just updated the draft, before React re-renders — read this ref there, not the state.
+  const polygonDraftRef = useRef<DrawnFeature<Polygon> | null>(null);
 
   useEffect(() => {
     if (!map || areaSelectDrawMode !== "rectangle") return;
@@ -88,6 +101,11 @@ export function AreaSelectLayer() {
   }, [map, areaSelectDrawMode, setAreaSelectDrawMode, setSelectedArea]);
 
   const preview = drag ? bboxPolygon(drag.start, drag.current) : null;
+  const isDrawingPolygon = drawFeatureMode?.kind === "polygon" && !pendingFeatureDraft;
+  const mode: DrawMode | null = areaSelectDrawMode === "rectangle" ? "rectangle" : isDrawingPolygon ? "polygon" : null;
+  // Once the polygon draft has been handed off (saved or cancelled) or drawing was aborted, stop
+  // including it — MapDraw's own value-sync effect then removes it from the draw store for us.
+  const visiblePolygonDraft = drawFeatureMode?.kind === "polygon" ? polygonDraft : null;
 
   return (
     <>
@@ -100,14 +118,27 @@ export function AreaSelectLayer() {
           linePaint={{ "line-color": "#38bdf8", "line-width": 1.5 }}
         />
       )}
-      {/* The committed area, rendered + drag-to-resize editable via terra-draw's select mode. */}
+      {/* The committed area (+ any in-progress dataset polygon draft), editable via terra-draw's select mode. */}
       <MapDraw<Polygon>
         id="area-select"
-        modes={EDITABLE_MODES}
-        mode={null}
-        value={selectedArea ? [selectedArea] : []}
-        onChange={(features) => setSelectedArea(features.at(-1) ?? null)}
-        color="#38bdf8"
+        modes={DRAW_MODES}
+        mode={mode}
+        value={[...(selectedArea ? [selectedArea] : []), ...(visiblePolygonDraft ? [visiblePolygonDraft] : [])]}
+        onChange={(features) => {
+          setSelectedArea(features.find((feature) => feature.properties.mode === "rectangle") ?? null);
+          const nextPolygonDraft = features.find((feature) => feature.properties.mode === "polygon") ?? null;
+          polygonDraftRef.current = nextPolygonDraft;
+          setPolygonDraft(nextPolygonDraft);
+        }}
+        onFinish={() => {
+          // Only the dataset-polygon session drives terra-draw's own draw interaction — the
+          // rectangle gesture above is handled manually and never triggers this callback.
+          const finished = polygonDraftRef.current;
+          if (finished && drawFeatureMode?.kind === "polygon") {
+            setPendingFeatureDraft({ datasetId: drawFeatureMode.datasetId, kind: "polygon", geometry: finished.geometry });
+          }
+        }}
+        color={isDrawingPolygon || pendingFeatureDraft?.kind === "polygon" ? "#4fd1c5" : "#38bdf8"}
       />
     </>
   );

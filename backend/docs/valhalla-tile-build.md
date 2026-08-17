@@ -125,6 +125,41 @@ Once `tiles.tar` exists and loads correctly, `~/data/valhalla/tiles/` (the explo
 directory) can be deleted to reclaim space — only the `.tar` is read at runtime. The
 PBFs are tiny enough to just keep around for a future rebuild.
 
+## Documenting coverage for users
+
+`~/data/valhalla/coverage.json` is a separate, hand-curated manifest — a name, an
+optional source URL, and a bounding box per area — read at runtime to show which areas
+have fast routing (the coverage dialog, in the console's rail and on `/docs`) and to let
+the chat agent reason about coverage gaps. It's deliberately independent of whatever's
+actually registered under `sources/` above: an area's entry doesn't need to track 1:1
+with what's currently compiled into `tiles.tar`, so this step never requires a rebuild.
+
+Add or update one area at a time with `scripts/describe_coverage_area.py`, pointing it
+at *any* PBF that covers that area (its original, unmerged download is ideal — accurate
+bounds, no merging needed) and, optionally, the URL you downloaded it from:
+
+```bash
+uv run python scripts/describe_coverage_area.py \
+  --name "District of Columbia" \
+  --url https://download.geofabrik.de/north-america/us/district-of-columbia-latest.osm.pbf \
+  ~/data/openstreetmap/district-of-columbia-latest.osm.pbf
+
+uv run python scripts/describe_coverage_area.py \
+  --name "Delaware" \
+  --url https://download.geofabrik.de/north-america/us/delaware-latest.osm.pbf \
+  ~/data/openstreetmap/delaware-latest.osm.pbf
+
+uv run python scripts/describe_coverage_area.py \
+  --name "Virginia" \
+  --url https://download.geofabrik.de/north-america/us/virginia-latest.osm.pbf \
+  ~/data/openstreetmap/virginia-latest.osm.pbf
+```
+
+Bounds come from the PBF's header (or, for a pre-merged input that lacks one, a one-time
+node scan). Deploying to a new host or S3 bucket means copying/uploading
+`coverage.json` alongside `tiles.tar` — it's resolved as a sibling file by default (or
+set `VALHALLA__COVERAGE_URI` explicitly).
+
 ## Skipping elevation and timezones
 
 - **Elevation** (`valhalla_build_elevation`): adds elevation-aware costing (e.g. bike

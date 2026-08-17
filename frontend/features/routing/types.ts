@@ -40,6 +40,16 @@ export type RerouteRequest = Omit<components["schemas"]["RerouteRequest"], "avoi
   waypoints?: Point[] | null;
 };
 
+export type RouteRequest = Omit<
+  components["schemas"]["RouteRequest"],
+  "origin" | "destination" | "waypoints" | "avoid"
+> & {
+  origin: Point;
+  destination: Point;
+  waypoints?: Point[];
+  avoid?: AvoidancePreferences;
+};
+
 export type ArrivalEstimateRequest = components["schemas"]["ArrivalEstimateRequest"];
 export type ArrivalEstimate = Defined<components["schemas"]["ArrivalEstimate"]>;
 

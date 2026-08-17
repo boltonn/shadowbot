@@ -4,9 +4,15 @@ import type {
   ArrivalEstimateRequest,
   RerouteRequest,
   Route,
+  RouteRequest,
   RouteSearchCriteria,
   RouteSearchMatch,
 } from "@/features/routing/types";
+
+export async function planRoute(body: RouteRequest): Promise<Route> {
+  const response = await apiClient.post<Route>("/routes", body);
+  return response.data;
+}
 
 export async function reroute(routeId: string, body: RerouteRequest): Promise<Route> {
   const response = await apiClient.post<Route>(`/routes/${routeId}/reroute`, body);

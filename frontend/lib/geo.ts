@@ -40,3 +40,13 @@ export function isPointInBbox(point: [number, number], polygon: Polygon): boolea
     lat <= Math.max(...lats)
   );
 }
+
+/** Average of the outer ring's vertices — good enough as a popup anchor, not a true geometric centroid. */
+export function polygonCentroid(polygon: Polygon): [number, number] {
+  const ring = polygon.coordinates[0];
+  const [lngSum, latSum] = ring.reduce(
+    ([lngAcc, latAcc], [lng, lat]) => [lngAcc + lng, latAcc + lat],
+    [0, 0],
+  );
+  return [lngSum / ring.length, latSum / ring.length];
+}

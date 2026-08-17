@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { uploadPolygonDataset } from "@/features/geodata/api";
+import { datasetKeys } from "@/features/geodata/query-keys";
 
 type UploadPolygonDatasetInput = {
   name: string;
@@ -14,7 +15,7 @@ export function useUploadPolygonDataset() {
     mutationFn: ({ name, file, categorySource }: UploadPolygonDatasetInput) =>
       uploadPolygonDataset(name, file, categorySource),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: datasetKeys.all });
     },
   });
 }
