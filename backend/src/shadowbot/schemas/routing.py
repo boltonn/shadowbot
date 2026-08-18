@@ -2,11 +2,12 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from geojson_pydantic import LineString, Point, Polygon
+from geojson_pydantic import LineString, MultiPolygon, Point, Polygon
 from pydantic import Field, model_validator
 
 from shadowbot.schemas.base import CamelModel
-from shadowbot.schemas.poi import OsmTag, PoiCategory
+from shadowbot.schemas.poi import OsmTag, PoiCategory, _PoiTagFields
+from shadowbot.schemas.point_dataset import PointDatasetAvoidance
 
 
 class NetworkType(StrEnum):
@@ -19,6 +20,19 @@ class NetworkType(StrEnum):
     ALL = "all"
 
 
+class BoundaryContact(StrEnum):
+    """How a way must relate to an area feature's boundary to count as a match.
+
+    CROSSES passes through the interior (a path that continues on the other side).
+    TOUCHES reaches the boundary without necessarily continuing through it (e.g. a
+    road that dead-ends right at a park's edge). ANY counts either.
+    """
+
+    CROSSES = "crosses"
+    TOUCHES = "touches"
+    ANY = "any"
+
+
 class GeocodeRequest(CamelModel):
     """A free-text place lookup."""
 
@@ -27,21 +41,29 @@ class GeocodeRequest(CamelModel):
 
 
 class GeocodeResult(CamelModel):
-    """A single geocoding match, carrying Nominatim's raw OSM identity and address detail
-    so a caller can show the underlying element rather than just a name and a pin."""
+    """A single geocoding match.
+
+    Nominatim's raw OSM identity and address detail to show underlying element rather
+    than just a name and a pin.
+    """
 
     display_name: str
     geometry: Point
     place_type: str | None = Field(default=None)
     osm_type: str | None = Field(default=None, description="OSM element type: node, way, or relation")
     osm_id: int | None = Field(default=None)
-    osm_class: str | None = Field(
-        default=None, description="Nominatim's category/class field, e.g. 'amenity', 'shop'"
-    )
+    osm_class: str | None = Field(default=None, description="Nominatim's category/class field, e.g. 'amenity', 'shop'")
     address: dict[str, str] = Field(
         default_factory=dict, description="Structured address components (house_number, road, city, state, etc.)"
     )
-    url: str | None = Field(default=None, description="Link to the raw element on openstreetmap.org")
+    boundary: Polygon | MultiPolygon | None = Field(
+        default=None,
+        description=(
+            "The result's actual administrative/area boundary (a city, county, park, etc.), when Nominatim "
+            "has one — None for a point-only result like an address or POI. Pass this as AreaSearchRequest.boundary "
+            "to search everywhere within the place rather than a radius around its center point."
+        ),
+    )
 
 
 class AvoidancePreferences(CamelModel):
@@ -49,6 +71,9 @@ class AvoidancePreferences(CamelModel):
 
     exclude_polygons covers both user-drawn avoid areas and "avoid this road"
     (a buffer drawn around the clicked road's geometry) with one mechanism.
+    avoid_point_datasets is resolved into more exclude_polygons before routing (see
+    analytics/avoidance.py) — it's the mechanism that makes 'avoid known camera locations'
+    actually change the computed route, rather than just reporting how many are passed.
     """
 
     avoid_tolls: bool = Field(default=False)
@@ -56,6 +81,7 @@ class AvoidancePreferences(CamelModel):
     avoid_unpaved: bool = Field(default=False)
     avoid_ferries: bool = Field(default=False)
     exclude_polygons: list[Polygon] = Field(default_factory=list)
+    avoid_point_datasets: list[PointDatasetAvoidance] = Field(default_factory=list)
 
 
 class RouteRequest(CamelModel):
@@ -136,21 +162,32 @@ class Route(CamelModel):
 
 
 class AreaMatch(CamelModel):
-    """An area feature (a park, lake, mall, or any other tagged polygon) a candidate route passes through."""
+    """A tagged OSM feature found by find_area_features/search_areas, or one a candidate route passes through.
+
+    Most categories (restaurants, bus stops, police stations, etc.) are mapped as single points in
+    OSM; a smaller set (parks, lakes, malls, bases, etc.) are mapped as polygons and carry a real
+    boundary. geometry reflects whichever OSM actually has — area_m2/exit_count are only meaningful,
+    and only populated, for a polygon match, since a point has no area or boundary for a road to
+    touch. A request that filters on min_area_m2/min_boundary_count naturally keeps only polygon
+    matches, since point matches never satisfy either.
+    """
 
     name: str | None = Field(default=None)
     category: PoiCategory | str = Field(
-        description="A PoiCategory value, or 'key=value' for a match found via through_raw_tags"
+        description="A PoiCategory value, or 'key=value' for a match found via raw_tags/through_raw_tags"
     )
-    geometry: Polygon
-    area_m2: float
-    exit_count: int = Field(
+    geometry: Point | Polygon
+    area_m2: float | None = Field(default=None, description="Set only when geometry is a Polygon/MultiPolygon")
+    exit_count: int | None = Field(
+        default=None,
         description=(
-            "Distinct points where the road/path network crosses the feature's outer boundary — a heuristic "
-            "proxy for entrances/exits, since OSM entrance tagging is too inconsistent to rely on directly."
-        )
+            "Set only when geometry is a Polygon/MultiPolygon. Distinct points where the road/path network "
+            "contacts the feature's outer boundary, per the search's way-type and boundary-contact filters — "
+            "a heuristic proxy for entrances/exits, since OSM entrance tagging is too inconsistent to rely on "
+            "directly."
+        ),
     )
-    osm_type: str | None = Field(default=None, description="OSM element type: way or relation (areas are never nodes)")
+    osm_type: str | None = Field(default=None, description="OSM element type: node, way, or relation")
     osm_id: int | None = Field(default=None)
     raw_tags: dict[str, str] = Field(
         default_factory=dict, description="Every OSM tag on the element (name, operator, website, etc.)"
@@ -196,8 +233,26 @@ class RouteSearchCriteria(CamelModel):
     min_area_exits: int | None = Field(
         default=None, ge=1, description="Minimum exit_count of the through_categories/through_raw_tags feature"
     )
+    through_way_types: list[str] = Field(
+        default_factory=list,
+        description=(
+            "OSM highway= tag values that count toward min_area_exits, e.g. ['path', 'footway', 'track'] "
+            "for trails/paths, or ['residential', 'service'] for small roads. Empty means every way type "
+            "counts. Use common OSM tagging conventions directly, same as through_raw_tags."
+        ),
+    )
+    through_boundary_contact: BoundaryContact = Field(
+        default=BoundaryContact.CROSSES,
+        description=(
+            "Whether a way must cross through the feature's boundary, merely touch it (e.g. a road that "
+            "dead-ends at a park's edge), or either, to count toward min_area_exits."
+        ),
+    )
     area_corridor_m: float = Field(
-        default=50, gt=0, le=500, description="How close the route must pass to the area feature to count as going through it"
+        default=50,
+        gt=0,
+        le=500,
+        description="How close the route must pass to the area feature to count as going through it",
     )
     max_candidates: int = Field(
         default=3,
@@ -213,7 +268,9 @@ class RouteSearchCriteria(CamelModel):
     def _require_area_tags_if_area_criteria(self) -> "RouteSearchCriteria":
         wants_area = self.min_area_m2 is not None or self.min_area_exits is not None
         if wants_area and not self.through_categories and not self.through_raw_tags:
-            raise ValueError("through_categories or through_raw_tags is required when min_area_m2/min_area_exits is set")
+            raise ValueError(
+                "through_categories or through_raw_tags is required when min_area_m2/min_area_exits is set"
+            )
         return self
 
 
@@ -224,6 +281,82 @@ class RouteSearchMatch(CamelModel):
     matched_area: AreaMatch | None = Field(
         default=None, description="The qualifying area feature the route passes through, when area criteria were set"
     )
+
+
+class AreaSearchRequest(_PoiTagFields):
+    """Find OSM features of any category (restaurants, bus stops, police stations, parks, lakes, ...) within a scope, independent of any route.
+
+    Not just polygon "area" features — most categories are single points in OSM, and come back
+    that way (see AreaMatch); a smaller set (parks, lakes, malls, bases, etc.) are polygons and
+    come back with their real boundary, area_m2, and exit_count. Unlike RouteSearchCriteria's
+    through_* fields (which check whether a *planned route* passes through a qualifying polygon
+    feature — a much stricter, often-empty condition, since most routes go around a park rather
+    than through it), this searches for every matching feature within the scope directly — e.g.
+    "show me all parks within 5km of downtown with at least 2 trails running through them", "every
+    police station in Cook County", or "restaurants and parks between Falls Church and Rosslyn".
+    Scope is exactly one of: origin + radius_m (a radius around a point), boundary (everywhere
+    within a polygon — a named place's administrative boundary from GeocodeResult.boundary, or a
+    hand-drawn area), or origin + destination + corridor_m (a strip between two points, for
+    "between A and B" — independent of any actual planned route). To narrow a prior result to only
+    the ones with a real boundary meeting some condition (e.g. "just the ones a small road touches
+    the edge of"), set min_boundary_count/way_types/boundary_contact — this only ever keeps polygon
+    matches, since a point has no boundary to touch.
+    """
+
+    origin: Point | None = Field(
+        default=None, description="Center point for a radius search, or one end of a between-two-points corridor"
+    )
+    radius_m: float | None = Field(
+        default=None, gt=0, le=50_000, description="Search radius around origin; required for a radius search"
+    )
+    boundary: Polygon | MultiPolygon | None = Field(
+        default=None,
+        description="Search everywhere within this polygon instead of a radius, e.g. a city/county boundary or a hand-drawn area",
+    )
+    destination: Point | None = Field(
+        default=None, description="Other end of a between-two-points corridor search; set together with origin"
+    )
+    corridor_m: float | None = Field(
+        default=None,
+        gt=0,
+        le=5_000,
+        description="Half-width of the corridor between origin and destination; required when destination is set",
+    )
+    way_types: list[str] = Field(
+        default_factory=list,
+        description=(
+            "OSM highway= tag values that count toward min_boundary_count, e.g. ['path', 'footway', "
+            "'track'] for trails/paths, or ['residential', 'service'] for small roads. Empty means "
+            "every way type counts."
+        ),
+    )
+    boundary_contact: BoundaryContact = Field(
+        default=BoundaryContact.CROSSES,
+        description=(
+            "Whether a way must cross through the feature's boundary, merely touch it (e.g. a road that "
+            "dead-ends at a park's edge), or either, to count toward min_boundary_count."
+        ),
+    )
+    min_area_m2: float | None = Field(default=None, gt=0, description="Minimum area of the matching feature")
+    min_boundary_count: int | None = Field(
+        default=None, ge=1, description="Minimum exit_count (see way_types/boundary_contact) of the matching feature"
+    )
+    limit: int = Field(default=5, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _require_exactly_one_scope(self) -> "AreaSearchRequest":
+        has_destination = self.destination is not None
+        has_boundary = self.boundary is not None
+        has_radius = self.radius_m is not None
+        if self.origin is None:
+            raise ValueError("origin is required, together with either radius_m, destination, or boundary")
+        if has_boundary and (has_destination or has_radius):
+            raise ValueError("Exactly one of radius_m, destination, or boundary must be set")
+        if has_destination == has_radius:
+            raise ValueError("Exactly one of radius_m (a radius search) or destination (a corridor search) must be set")
+        if has_destination and self.corridor_m is None:
+            raise ValueError("corridor_m is required when destination is set")
+        return self
 
 
 class RouteCompareRequest(CamelModel):

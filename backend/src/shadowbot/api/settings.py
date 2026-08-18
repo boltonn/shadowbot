@@ -21,10 +21,10 @@ class Settings(BaseSettings):
     osm_website_url: str = Field(
         default="https://www.openstreetmap.org",
         description=(
-            "Base URL for linking a result back to its raw node/way/relation page — used by geocode, "
-            "POI, and area-feature results alike, so it's a deployment-wide setting rather than owned "
-            "by whichever integration (Nominatim, Overpass) happened to resolve a given result. Point "
-            "it at a self-hosted OSM website mirror for a fully offline deployment."
+            "Base URL for linking a result back to its raw node/way/relation page — used by POI and "
+            "area-feature results, so it's a deployment-wide setting rather than owned by whichever "
+            "integration (Overpass) happened to resolve a given result. Point it at a self-hosted OSM "
+            "website mirror for a fully offline deployment."
         ),
     )
 

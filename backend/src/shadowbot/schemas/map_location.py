@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from geojson_pydantic import Point
+from geojson_pydantic import Point, Polygon
 from pydantic import Field
 
 from shadowbot.schemas.base import CamelModel
@@ -22,7 +22,9 @@ class MapLocation(CamelModel):
     id: str = Field(description="Stable, human-legible id (e.g. a slug of the name) so it can be referenced later")
     kind: str = Field(description="Icon category, e.g. 'hotel', 'gas_station', 'geocode', or a raw 'key=value' tag")
     label: str
-    geometry: Point
+    geometry: Point | Polygon = Field(
+        description="A Point for most markers; a Polygon for an area feature's actual boundary (e.g. an AreaMatch)"
+    )
     properties: dict[str, str] = Field(
         default_factory=dict,
         description=(

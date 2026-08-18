@@ -84,6 +84,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/areas/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search Areas Route
+         * @description Find polygon area features near a point, independent of any route.
+         */
+        post: operations["search_areas_route_areas_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/routes/{route_id}/reroute": {
         parameters: {
             query?: never;
@@ -580,27 +600,38 @@ export interface components {
         };
         /**
          * AreaMatch
-         * @description An area feature (a park, lake, mall, or any other tagged polygon) a candidate route passes through.
+         * @description A tagged OSM feature found by find_area_features/search_areas, or one a candidate route passes through.
+         *
+         *     Most categories (restaurants, bus stops, police stations, etc.) are mapped as single points in
+         *     OSM; a smaller set (parks, lakes, malls, bases, etc.) are mapped as polygons and carry a real
+         *     boundary. geometry reflects whichever OSM actually has — area_m2/exit_count are only meaningful,
+         *     and only populated, for a polygon match, since a point has no area or boundary for a road to
+         *     touch. A request that filters on min_area_m2/min_boundary_count naturally keeps only polygon
+         *     matches, since point matches never satisfy either.
          */
         AreaMatch: {
             /** Name */
             name?: string | null;
             /**
              * Category
-             * @description A PoiCategory value, or 'key=value' for a match found via through_raw_tags
+             * @description A PoiCategory value, or 'key=value' for a match found via raw_tags/through_raw_tags
              */
             category: components["schemas"]["PoiCategory"] | string;
-            geometry: components["schemas"]["Polygon"];
-            /** Aream2 */
-            areaM2: number;
+            /** Geometry */
+            geometry: components["schemas"]["Point"] | components["schemas"]["Polygon"];
+            /**
+             * Aream2
+             * @description Set only when geometry is a Polygon/MultiPolygon
+             */
+            areaM2?: number | null;
             /**
              * Exitcount
-             * @description Distinct points where the road/path network crosses the feature's outer boundary — a heuristic proxy for entrances/exits, since OSM entrance tagging is too inconsistent to rely on directly.
+             * @description Set only when geometry is a Polygon/MultiPolygon. Distinct points where the road/path network contacts the feature's outer boundary, per the search's way-type and boundary-contact filters — a heuristic proxy for entrances/exits, since OSM entrance tagging is too inconsistent to rely on directly.
              */
-            exitCount: number;
+            exitCount?: number | null;
             /**
              * Osmtype
-             * @description OSM element type: way or relation (areas are never nodes)
+             * @description OSM element type: node, way, or relation
              */
             osmType?: string | null;
             /** Osmid */
@@ -617,6 +648,82 @@ export interface components {
              * @description Link to the raw element on openstreetmap.org
              */
             url?: string | null;
+        };
+        /**
+         * AreaSearchRequest
+         * @description Find OSM features of any category (restaurants, bus stops, police stations, parks, lakes, ...) within a scope, independent of any route.
+         *
+         *     Not just polygon "area" features — most categories are single points in OSM, and come back
+         *     that way (see AreaMatch); a smaller set (parks, lakes, malls, bases, etc.) are polygons and
+         *     come back with their real boundary, area_m2, and exit_count. Unlike RouteSearchCriteria's
+         *     through_* fields (which check whether a *planned route* passes through a qualifying polygon
+         *     feature — a much stricter, often-empty condition, since most routes go around a park rather
+         *     than through it), this searches for every matching feature within the scope directly — e.g.
+         *     "show me all parks within 5km of downtown with at least 2 trails running through them", "every
+         *     police station in Cook County", or "restaurants and parks between Falls Church and Rosslyn".
+         *     Scope is exactly one of: origin + radius_m (a radius around a point), boundary (everywhere
+         *     within a polygon — a named place's administrative boundary from GeocodeResult.boundary, or a
+         *     hand-drawn area), or origin + destination + corridor_m (a strip between two points, for
+         *     "between A and B" — independent of any actual planned route). To narrow a prior result to only
+         *     the ones with a real boundary meeting some condition (e.g. "just the ones a small road touches
+         *     the edge of"), set min_boundary_count/way_types/boundary_contact — this only ever keeps polygon
+         *     matches, since a point has no boundary to touch.
+         */
+        AreaSearchRequest: {
+            /**
+             * Categories
+             * @description e.g. [gas_station, coffee] to search both in one request
+             */
+            categories?: components["schemas"]["PoiCategory"][];
+            /**
+             * Rawtags
+             * @description Raw OSM key/value tags for categories not in PoiCategory, e.g. {key: 'leisure', value: 'park'} or {key: 'tourism', value: 'museum'}. You know common OSM tagging conventions — use them directly rather than refusing a search just because it isn't in the curated category list. Combine freely with categories in the same call.
+             */
+            rawTags?: components["schemas"]["OsmTag"][];
+            /** @description Center point for a radius search, or one end of a between-two-points corridor */
+            origin?: components["schemas"]["Point"] | null;
+            /**
+             * Radiusm
+             * @description Search radius around origin; required for a radius search
+             */
+            radiusM?: number | null;
+            /**
+             * Boundary
+             * @description Search everywhere within this polygon instead of a radius, e.g. a city/county boundary or a hand-drawn area
+             */
+            boundary?: components["schemas"]["Polygon"] | components["schemas"]["MultiPolygon"] | null;
+            /** @description Other end of a between-two-points corridor search; set together with origin */
+            destination?: components["schemas"]["Point"] | null;
+            /**
+             * Corridorm
+             * @description Half-width of the corridor between origin and destination; required when destination is set
+             */
+            corridorM?: number | null;
+            /**
+             * Waytypes
+             * @description OSM highway= tag values that count toward min_boundary_count, e.g. ['path', 'footway', 'track'] for trails/paths, or ['residential', 'service'] for small roads. Empty means every way type counts.
+             */
+            wayTypes?: string[];
+            /**
+             * @description Whether a way must cross through the feature's boundary, merely touch it (e.g. a road that dead-ends at a park's edge), or either, to count toward min_boundary_count.
+             * @default crosses
+             */
+            boundaryContact: components["schemas"]["BoundaryContact"];
+            /**
+             * Minaream2
+             * @description Minimum area of the matching feature
+             */
+            minAreaM2?: number | null;
+            /**
+             * Minboundarycount
+             * @description Minimum exit_count (see way_types/boundary_contact) of the matching feature
+             */
+            minBoundaryCount?: number | null;
+            /**
+             * Limit
+             * @default 5
+             */
+            limit: number;
         };
         /**
          * ArrivalEstimate
@@ -669,6 +776,9 @@ export interface components {
          *
          *     exclude_polygons covers both user-drawn avoid areas and "avoid this road"
          *     (a buffer drawn around the clicked road's geometry) with one mechanism.
+         *     avoid_point_datasets is resolved into more exclude_polygons before routing (see
+         *     analytics/avoidance.py) — it's the mechanism that makes 'avoid known camera locations'
+         *     actually change the computed route, rather than just reporting how many are passed.
          */
         AvoidancePreferences: {
             /**
@@ -693,6 +803,8 @@ export interface components {
             avoidFerries: boolean;
             /** Excludepolygons */
             excludePolygons?: components["schemas"]["Polygon"][];
+            /** Avoidpointdatasets */
+            avoidPointDatasets?: components["schemas"]["PointDatasetAvoidance"][];
         };
         /** Body_preview_tabular_points_geodata_datasets_points_preview_post */
         Body_preview_tabular_points_geodata_datasets_points_preview_post: {
@@ -732,6 +844,16 @@ export interface components {
             /** Name */
             name: string;
         };
+        /**
+         * BoundaryContact
+         * @description How a way must relate to an area feature's boundary to count as a match.
+         *
+         *     CROSSES passes through the interior (a path that continues on the other side).
+         *     TOUCHES reaches the boundary without necessarily continuing through it (e.g. a
+         *     road that dead-ends right at a park's edge). ANY counts either.
+         * @enum {string}
+         */
+        BoundaryContact: "crosses" | "touches" | "any";
         /**
          * BulkTagRequest
          * @description Apply and/or remove tags across a set of features in one dataset.
@@ -844,8 +966,10 @@ export interface components {
         };
         /**
          * GeocodeResult
-         * @description A single geocoding match, carrying Nominatim's raw OSM identity and address detail
-         *     so a caller can show the underlying element rather than just a name and a pin.
+         * @description A single geocoding match.
+         *
+         *     Nominatim's raw OSM identity and address detail to show underlying element rather
+         *     than just a name and a pin.
          */
         GeocodeResult: {
             /** Displayname */
@@ -873,10 +997,10 @@ export interface components {
                 [key: string]: string;
             };
             /**
-             * Url
-             * @description Link to the raw element on openstreetmap.org
+             * Boundary
+             * @description The result's actual administrative/area boundary (a city, county, park, etc.), when Nominatim has one — None for a point-only result like an address or POI. Pass this as AreaSearchRequest.boundary to search everywhere within the place rather than a radius around its center point.
              */
-            url?: string | null;
+            boundary?: components["schemas"]["Polygon"] | components["schemas"]["MultiPolygon"] | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1015,6 +1139,33 @@ export interface components {
             hasKey: boolean;
         };
         /**
+         * MultiPolygon
+         * @description MultiPolygon Model
+         */
+        MultiPolygon: {
+            /** Bbox */
+            bbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | [
+                number,
+                number,
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /**
+             * Type
+             * @constant
+             */
+            type: "MultiPolygon";
+            /** Coordinates */
+            coordinates: (components["schemas"]["Position2D"] | components["schemas"]["Position3D"])[][][];
+        };
+        /**
          * NetworkType
          * @description osmnx street network filter — what mode of travel the road graph should represent.
          * @enum {string}
@@ -1114,6 +1265,45 @@ export interface components {
              * Format: date-time
              */
             dateCreated: string;
+        };
+        /**
+         * PointDatasetAvoidance
+         * @description An uploaded point dataset's matching features to route around, e.g. known camera locations.
+         *
+         *     Resolved before routing by buffering every matching feature by buffer_m into an exclusion
+         *     zone (the same mechanism as a user-drawn avoid area) — this is what makes 'avoid cameras'
+         *     actually change the computed route, rather than just reporting how many are passed.
+         */
+        PointDatasetAvoidance: {
+            /** Datasetid */
+            datasetId: string;
+            /**
+             * Category
+             * @description Filter to one category, e.g. 'camera'
+             */
+            category?: string | null;
+            /**
+             * Includetags
+             * @description Only avoid features carrying at least one of these tags
+             */
+            includeTags?: string[];
+            /**
+             * Excludetags
+             * @description Never avoid features carrying any of these tags, e.g. ['indoor'] for cameras with no bearing on a road route
+             */
+            excludeTags?: string[];
+            /**
+             * Corridorm
+             * @description How far off the route/straight origin-destination line a feature still counts as relevant
+             * @default 1000
+             */
+            corridorM: number;
+            /**
+             * Bufferm
+             * @description Radius around each matching feature excluded from routing
+             * @default 50
+             */
+            bufferM: number;
         };
         /**
          * PointDatasetDetail
@@ -1497,6 +1687,16 @@ export interface components {
              */
             minAreaExits?: number | null;
             /**
+             * Throughwaytypes
+             * @description OSM highway= tag values that count toward min_area_exits, e.g. ['path', 'footway', 'track'] for trails/paths, or ['residential', 'service'] for small roads. Empty means every way type counts. Use common OSM tagging conventions directly, same as through_raw_tags.
+             */
+            throughWayTypes?: string[];
+            /**
+             * @description Whether a way must cross through the feature's boundary, merely touch it (e.g. a road that dead-ends at a park's edge), or either, to count toward min_area_exits.
+             * @default crosses
+             */
+            throughBoundaryContact: components["schemas"]["BoundaryContact"];
+            /**
              * Areacorridorm
              * @description How close the route must pass to the area feature to count as going through it
              * @default 50
@@ -1774,6 +1974,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RouteSearchMatch"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_areas_route_areas_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AreaSearchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaMatch"][];
                 };
             };
             /** @description Validation Error */

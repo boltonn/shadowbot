@@ -8,16 +8,14 @@ AreaFeatureFinder after the fact, and only candidates clearing every requested t
 persisted and returned.
 """
 
-from geojson_pydantic import Polygon
-from shapely.geometry import mapping, shape
-
+from shadowbot.analytics.avoidance import line_between, resolve_avoid
 from shadowbot.datastores.base.routing import RoutingRepository
 from shadowbot.datastores.networkx.area_features import AreaFeatureFinder
+from shadowbot.datastores.postgres.repositories.point_dataset import PostgresPointDatasetRepository
 from shadowbot.datastores.postgres.repositories.route import PostgresRouteRepository
 from shadowbot.integrations.nominatim import NominatimClient
 from shadowbot.schemas.routing import (
     AreaMatch,
-    GeocodeRequest,
     Route,
     RouteAlternate,
     RouteLeg,
@@ -25,19 +23,6 @@ from shadowbot.schemas.routing import (
     RouteSearchCriteria,
     RouteSearchMatch,
 )
-
-_METERS_PER_DEGREE = 111_320
-
-
-async def _resolve_avoid_polygons(geocoder: NominatimClient, places: list[str], radius_m: float) -> list[Polygon]:
-    polygons = []
-    for place in places:
-        results = await geocoder.geocode(GeocodeRequest(query=place, limit=1))
-        if not results:
-            continue
-        buffered = shape(results[0].geometry.model_dump(mode="json")).buffer(radius_m / _METERS_PER_DEGREE)
-        polygons.append(Polygon(**mapping(buffered)))
-    return polygons
 
 
 def _alternate_to_route(primary: Route, alternate: RouteAlternate) -> Route:
@@ -73,6 +58,9 @@ async def _best_qualifying_area(
         categories=request.through_categories,
         raw_tags=request.through_raw_tags,
         corridor_m=request.area_corridor_m,
+        way_types=request.through_way_types,
+        boundary_contact=request.through_boundary_contact,
+        compute_exit_count=request.min_area_exits is not None,
     )
     qualifying = [
         area
@@ -91,10 +79,17 @@ async def search_routes(
     routes: PostgresRouteRepository,
     areas: AreaFeatureFinder,
     geocoder: NominatimClient,
+    point_datasets: PostgresPointDatasetRepository,
 ) -> list[RouteSearchMatch]:
     """Generate candidate routes for request.origin/destination and keep only those matching every criterion."""
-    avoid = request.avoid.model_copy(deep=True)
-    avoid.exclude_polygons += await _resolve_avoid_polygons(geocoder, request.avoid_places, request.avoid_radius_m)
+    avoid = await resolve_avoid(
+        request.avoid,
+        line_between(request.origin, request.destination),
+        point_datasets,
+        geocoder=geocoder,
+        avoid_places=request.avoid_places,
+        avoid_radius_m=request.avoid_radius_m,
+    )
 
     primary = await routing.compute_route(
         RouteRequest(

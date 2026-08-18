@@ -16,7 +16,6 @@ settings = Settings()
 def get_area_feature_finder() -> AreaFeatureFinder:
     """Return the area-feature lookup backend, sharing the road network's Overpass client."""
     return AreaFeatureFinder(
-        config=settings.routing,
         overpass_client=get_overpass_client(),
         osm_website_url=settings.osm_website_url,
     )

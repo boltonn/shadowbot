@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import type { Point } from "geojson";
 
-export type RoutePlannerPoint = { point: Point; label: string };
+export type RoutePlannerPoint = {
+  point: Point;
+  label: string;
+  /** Raw OSM identity/address, when set from a geocode result — omitted for a map-clicked point. */
+  properties?: Record<string, string>;
+};
 type PickTarget = "origin" | "destination" | null;
 
 type RoutePlannerState = {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { MapMouseEvent } from "maplibre-gl";
 import { useMap } from "@/components/ui/map";
+import { useMapStore } from "@/features/map/store";
 import { cn } from "@/lib/utils";
 
 function formatCoordinate(value: number, positiveLabel: string, negativeLabel: string): string {
@@ -13,6 +14,8 @@ export function MapHud() {
   const { map, isLoaded } = useMap();
   const [cursor, setCursor] = useState<{ lng: number; lat: number } | null>(null);
   const [zoom, setZoom] = useState<number | null>(null);
+  const isAgentBusy = useMapStore((state) => state.isAgentBusy);
+  const agentBusyLabel = useMapStore((state) => state.agentBusyLabel);
 
   useEffect(() => {
     if (!map) return;
@@ -49,6 +52,15 @@ export function MapHud() {
       </span>
       <span className="text-border">/</span>
       <span>Z{zoom?.toFixed(1) ?? "-"}</span>
+      {isAgentBusy && (
+        <>
+          <span className="text-border">/</span>
+          <span className="flex items-center gap-1.5 text-signal">
+            <span className="size-1.5 animate-pulse rounded-full bg-signal" />
+            {agentBusyLabel ?? "Working…"}
+          </span>
+        </>
+      )}
     </div>
   );
 }

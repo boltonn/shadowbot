@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Point, Polygon } from "geojson";
 import type { DrawMode, DrawnFeature } from "@/components/ui/map-draw";
-import type { Route, RouteAlternate, RouteSearchMatch } from "@/features/routing/types";
+import type { AreaMatch, Route, RouteAlternate, RouteSearchMatch } from "@/features/routing/types";
 import type { ChatLocation, ChatLocationAction, TimeWindow } from "@/features/map/types";
 import type { DatasetGeometryKind } from "@/features/geodata/types";
 
@@ -21,6 +21,8 @@ export type PendingFeatureDraft = {
 type MapState = {
   activeRoute: Route | null;
   matchedRoutes: RouteSearchMatch[];
+  matchedAreas: AreaMatch[];
+  selectedMatchedAreaId: string | null;
   visibleDatasetIds: string[];
   chatLocations: ChatLocation[];
   trackTimeWindows: Record<string, TimeWindow>;
@@ -34,11 +36,18 @@ type MapState = {
   selectedChatLocationId: string | null;
   /** Bumped to re-fit the map to the active route on demand, even if the route itself didn't change. */
   routeFocusToken: number;
+  /** Whether the chat agent has a request in flight — surfaced on the map HUD, since a user
+   * watching the map for new pins/polygons has no other way to tell a slow request from a stuck one. */
+  isAgentBusy: boolean;
+  agentBusyLabel: string | null;
   setActiveRoute: (route: Route | null) => void;
   selectAlternate: (alternateId: string) => void;
   setMatchedRoutes: (matches: RouteSearchMatch[]) => void;
   selectMatchedRoute: (routeId: string) => void;
   clearMatchedRoutes: () => void;
+  setMatchedAreas: (matches: AreaMatch[]) => void;
+  clearMatchedAreas: () => void;
+  setSelectedMatchedAreaId: (id: string | null) => void;
   toggleDatasetVisibility: (datasetId: string) => void;
   applyChatLocationsUpdate: (action: ChatLocationAction, locations: ChatLocation[], removeIds: string[]) => void;
   renameChatLocation: (id: string, label: string) => void;
@@ -53,11 +62,14 @@ type MapState = {
   setPendingFeatureDraft: (draft: PendingFeatureDraft | null) => void;
   setSelectedChatLocationId: (id: string | null) => void;
   focusActiveRoute: () => void;
+  setAgentBusy: (busy: boolean, label?: string | null) => void;
 };
 
 export const useMapStore = create<MapState>((set) => ({
   activeRoute: null,
   matchedRoutes: [],
+  matchedAreas: [],
+  selectedMatchedAreaId: null,
   visibleDatasetIds: [],
   chatLocations: [],
   trackTimeWindows: {},
@@ -70,6 +82,8 @@ export const useMapStore = create<MapState>((set) => ({
   pendingFeatureDraft: null,
   selectedChatLocationId: null,
   routeFocusToken: 0,
+  isAgentBusy: false,
+  agentBusyLabel: null,
   setActiveRoute: (route) => set({ activeRoute: route }),
   setMatchedRoutes: (matches) => set({ matchedRoutes: matches }),
   selectMatchedRoute: (routeId) =>
@@ -79,6 +93,9 @@ export const useMapStore = create<MapState>((set) => ({
       return { activeRoute: chosen.route, matchedRoutes: [] };
     }),
   clearMatchedRoutes: () => set({ matchedRoutes: [] }),
+  setMatchedAreas: (matches) => set({ matchedAreas: matches }),
+  clearMatchedAreas: () => set({ matchedAreas: [], selectedMatchedAreaId: null }),
+  setSelectedMatchedAreaId: (id) => set({ selectedMatchedAreaId: id }),
   selectAlternate: (alternateId) =>
     set((state) => {
       const current = state.activeRoute;
@@ -142,4 +159,5 @@ export const useMapStore = create<MapState>((set) => ({
   setPendingFeatureDraft: (draft) => set({ pendingFeatureDraft: draft }),
   setSelectedChatLocationId: (id) => set({ selectedChatLocationId: id }),
   focusActiveRoute: () => set((state) => ({ routeFocusToken: state.routeFocusToken + 1 })),
+  setAgentBusy: (busy, label = null) => set({ isAgentBusy: busy, agentBusyLabel: busy ? label : null }),
 }));

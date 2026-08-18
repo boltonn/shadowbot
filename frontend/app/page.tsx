@@ -5,9 +5,9 @@ import { ResizableSidebar } from "@/components/resizable-sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ChatPanel } from "@/features/chat/components/chat-panel";
 import { GeodataPanel } from "@/features/geodata/components/geodata-panel";
-import { FindLocationPanel } from "@/features/location/components/find-location-panel";
+import { LocationPanel } from "@/features/location/components/location-panel";
 import { MapView } from "@/features/map/components/map-view";
-import { RoutePlannerPanel } from "@/features/routing/components/route-planner-panel";
+import { RoutingPanel } from "@/features/routing/components/routing-panel";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -62,7 +62,7 @@ export default function Home() {
                 activeView !== "routing" && "hidden",
               )}
             >
-              <RoutePlannerPanel />
+              <RoutingPanel />
             </div>
             <div
               className={cn(
@@ -70,7 +70,7 @@ export default function Home() {
                 activeView !== "location" && "hidden",
               )}
             >
-              <FindLocationPanel />
+              <LocationPanel />
             </div>
           </div>
         </ResizableSidebar>

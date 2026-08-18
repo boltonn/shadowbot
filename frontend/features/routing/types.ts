@@ -1,4 +1,4 @@
-import type { LineString, Point, Polygon } from "geojson";
+import type { LineString, MultiPolygon, Point, Polygon } from "geojson";
 import type { components } from "@/types/generated";
 
 /**
@@ -24,6 +24,8 @@ export type NetworkType = components["schemas"]["NetworkType"];
 export type AvoidancePreferences = Defined<Omit<components["schemas"]["AvoidancePreferences"], "excludePolygons">> & {
   excludePolygons: Polygon[];
 };
+
+export type PointDatasetAvoidance = components["schemas"]["PointDatasetAvoidance"];
 
 export type RouteAlternate = Defined<Omit<components["schemas"]["RouteAlternate"], "geometry">> & {
   geometry: LineString;
@@ -71,8 +73,13 @@ export type Route = Defined<
 export type PoiCategory = components["schemas"]["PoiCategory"];
 export type OsmTag = components["schemas"]["OsmTag"];
 
-export type AreaMatch = Defined<Omit<components["schemas"]["AreaMatch"], "geometry">> & {
-  geometry: Polygon;
+export type AreaMatch = Defined<Omit<components["schemas"]["AreaMatch"], "geometry" | "areaM2" | "exitCount">> & {
+  // Most categories (restaurants, bus stops, police stations, ...) come back as points; only a
+  // smaller set (parks, lakes, malls, bases, ...) come back as polygons with a real boundary —
+  // areaM2/exitCount are set only for those.
+  geometry: Point | Polygon;
+  areaM2: number | null;
+  exitCount: number | null;
 };
 
 export type RouteSearchCriteria = Omit<
@@ -87,4 +94,12 @@ export type RouteSearchCriteria = Omit<
 export type RouteSearchMatch = Defined<Omit<components["schemas"]["RouteSearchMatch"], "route" | "matchedArea">> & {
   route: Route;
   matchedArea: AreaMatch | null;
+};
+
+export type BoundaryContact = components["schemas"]["BoundaryContact"];
+
+export type AreaSearchRequest = Omit<components["schemas"]["AreaSearchRequest"], "origin" | "destination" | "boundary"> & {
+  origin?: Point | null;
+  destination?: Point | null;
+  boundary?: Polygon | MultiPolygon | null;
 };

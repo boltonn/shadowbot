@@ -74,10 +74,54 @@ class PointDatasetAlongRouteRequest(CamelModel):
     """Find a point dataset's features within a corridor around a previously planned route."""
 
     category: str | None = Field(default=None, description="Filter to one category, e.g. 'camera_light'")
+    include_tags: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Only keep features carrying at least one of these tags, e.g. ['outdoor'] or ['verified']. "
+            "Empty means no tag-based inclusion filter."
+        ),
+    )
+    exclude_tags: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Drop features carrying any of these tags, e.g. ['indoor'] to skip indoor cameras that have "
+            "no bearing on a road route. Use this whenever the person qualifies a request with a "
+            "distinction the dataset's tags capture (indoor/outdoor, decommissioned, etc.) rather than "
+            "ignoring the qualifier — check the dataset's tags (from list_point_datasets) first."
+        ),
+    )
     corridor_m: float = Field(
         default=100, gt=0, le=5_000, description="How far off the route path still counts as 'passed'"
     )
     limit: int = Field(default=50, ge=1, le=500)
+
+
+class PointDatasetAvoidance(CamelModel):
+    """An uploaded point dataset's matching features to route around, e.g. known camera locations.
+
+    Resolved before routing by buffering every matching feature by buffer_m into an exclusion
+    zone (the same mechanism as a user-drawn avoid area) — this is what makes 'avoid cameras'
+    actually change the computed route, rather than just reporting how many are passed.
+    """
+
+    dataset_id: str
+    category: str | None = Field(default=None, description="Filter to one category, e.g. 'camera'")
+    include_tags: list[str] = Field(
+        default_factory=list, description="Only avoid features carrying at least one of these tags"
+    )
+    exclude_tags: list[str] = Field(
+        default_factory=list,
+        description="Never avoid features carrying any of these tags, e.g. ['indoor'] for cameras with no bearing on a road route",
+    )
+    corridor_m: float = Field(
+        default=1_000,
+        gt=0,
+        le=20_000,
+        description="How far off the route/straight origin-destination line a feature still counts as relevant",
+    )
+    buffer_m: float = Field(
+        default=50, gt=0, le=2_000, description="Radius around each matching feature excluded from routing"
+    )
 
 
 class PointFeatureOnRoute(PointFeature):

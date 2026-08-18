@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   Clock,
   Database,
+  Filter,
   GitCompare,
   History,
   Layers,
@@ -11,6 +12,7 @@ import {
   Radar,
   Route,
   RouteOff,
+  Shapes,
   Waypoints,
 } from "lucide-react";
 import type { Metadata } from "next";
@@ -134,6 +136,33 @@ const toolGroups: ToolGroup[] = [
         confidence: "DETERMINISTIC",
         description:
           "Reports which regions, if any, have fast, pre-compiled Valhalla routing on this deployment — visible on the map itself as a dashed overlay with a legend (top-right), and to the agent as a tool it checks before promising fast routing somewhere untested, or after a route/isochrone call fails outside every compiled region. Either way, it can hand back a pre-filled GitHub issue link to request that a region be added. Only meaningful when the Valhalla backend is configured; the NetworkX fallback has no notion of covered regions since it routes live, everywhere, just slower.",
+      },
+      {
+        code: "RTE-07",
+        name: "Multi-Criteria Route Search",
+        functions: "search_routes",
+        icon: Filter,
+        method:
+          "Primary path + Valhalla alternates, filtered post-hoc against Area Search",
+        confidence: "HEURISTIC",
+        description:
+          "For constraints a single planned route can't express directly: travel mode and named places/roads to avoid (geocoded automatically into buffered exclusion zones), plus — the part routing engines have no notion of — passing through a qualifying area feature (a park, lake, mall, etc.) that meets a minimum size and/or a minimum number of boundary crossings. Every candidate route (the primary path, plus any Valhalla alternates) is generated first and checked against Area Search's boundary-crossing count after the fact, since that constraint can't be costed into pathfinding directly. Only candidates clearing every threshold are kept, already planned and saved. An empty result means nothing qualified — reported as such, not relaxed automatically.",
+      },
+    ],
+  },
+  {
+    label: "Area Features",
+    tools: [
+      {
+        code: "ARA-01",
+        name: "Area Search",
+        functions: "find_area_features",
+        icon: Shapes,
+        method:
+          "Overpass polygon tag query + road-network boundary-crossing count (OSMnx)",
+        confidence: "HEURISTIC",
+        description:
+          "Finds every tagged polygon feature — a park, lake, mall, military base, or any other OSM-tagged area — within a radius of a point, independent of any route: “every park within 5km with at least two trail crossings,” not just whether one already-planned path happens to pass through one (see Multi-Criteria Route Search for that). Each match reports its true area in square meters and an exit_count: distinct points where the road or path network crosses, or merely touches, its outer boundary, filtered by way type — a heuristic stand-in for real entrances, since OSM's own entrance tagging is too inconsistent to rely on directly. Ranked largest-area-first, capped at a limit.",
       },
     ],
   },

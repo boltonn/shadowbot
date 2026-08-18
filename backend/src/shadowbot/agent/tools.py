@@ -6,6 +6,8 @@ import httpx
 from geojson_pydantic import Point
 from pydantic_ai import ModelRetry, RunContext
 
+from shadowbot.analytics.area_search import search_areas as compute_area_search
+from shadowbot.analytics.avoidance import line_between, resolve_avoid, route_geometry_line
 from shadowbot.analytics.frequented_locations import apply_location_labels, compute_frequented_locations
 from shadowbot.analytics.route_search import search_routes as compute_route_search
 from shadowbot.datastores.base.routing import RoutingRepository
@@ -30,6 +32,8 @@ from shadowbot.schemas.point_dataset import (
 )
 from shadowbot.schemas.polygon_dataset import PolygonDataset, PolygonDatasetsRequest
 from shadowbot.schemas.routing import (
+    AreaMatch,
+    AreaSearchRequest,
     ArrivalEstimate,
     ArrivalEstimateRequest,
     GeocodeRequest,
@@ -40,9 +44,9 @@ from shadowbot.schemas.routing import (
     Route,
     RouteComparison,
     RouteRequest,
-    RoutingCoverage,
     RouteSearchCriteria,
     RouteSearchMatch,
+    RoutingCoverage,
 )
 from shadowbot.schemas.track import (
     FrequentedLocation,
@@ -122,8 +126,15 @@ async def plan_route(ctx: RunContext[AgentDeps], request: RouteRequest) -> Route
 
     Pass ordered stops (e.g. a gas station found via find_poi_along_route) via
     request.waypoints for a single continuous multi-stop route, rather than
-    planning separate legs and stitching them together yourself.
+    planning separate legs and stitching them together yourself. To actually route around an
+    uploaded point dataset's features (e.g. 'avoid known camera locations'), rather than just
+    reporting them, set request.avoid.avoid_point_datasets — don't just call
+    find_point_dataset_along_route and describe the count, since that never changes the route.
     """
+    resolved_avoid = await resolve_avoid(
+        request.avoid, line_between(request.origin, request.destination), ctx.deps.point_datasets
+    )
+    request = request.model_copy(update={"avoid": resolved_avoid})
     try:
         route = await ctx.deps.routing.compute_route(request)
     except ValueError as exc:
@@ -135,17 +146,60 @@ async def search_routes(ctx: RunContext[AgentDeps], request: RouteSearchCriteria
     """Generate candidate routes between an origin and destination and keep only those matching every criterion.
 
     Use this instead of plan_route when the person describes constraints a single planned route
-    can't express directly — travel mode, named places/roads to avoid (geocoded automatically), and/or
-    passing through an area feature (a park, lake, mall, etc., via request.through_categories/
-    through_raw_tags — same OSM tagging convention as find_nearby_poi) that meets a minimum size
-    and/or a minimum number of boundary crossings ("exits"). Each returned match's route is already
-    planned and persisted, ready to pass to reroute/compare_routes/estimate_arrival like any other.
-    An empty result means no candidate satisfied every criterion — say so rather than relaxing the
-    request's criteria yourself.
+    can't express directly — travel mode, named places/roads to avoid (geocoded automatically),
+    an uploaded point dataset's features to avoid (request.avoid.avoid_point_datasets — see
+    plan_route's docstring), and/or passing through an area feature (a park, lake, mall, etc., via
+    request.through_categories/through_raw_tags — same OSM tagging convention as find_nearby_poi)
+    that meets a minimum size and/or a minimum number of boundary crossings ("exits"). Each
+    returned match's route is already planned and persisted, ready to pass to reroute/
+    compare_routes/estimate_arrival like any other. An empty result means no candidate satisfied
+    every criterion — say so rather than relaxing the request's criteria yourself.
     """
     return await compute_route_search(
-        request, routing=ctx.deps.routing, routes=ctx.deps.routes, areas=ctx.deps.areas, geocoder=ctx.deps.geocoder
+        request,
+        routing=ctx.deps.routing,
+        routes=ctx.deps.routes,
+        areas=ctx.deps.areas,
+        geocoder=ctx.deps.geocoder,
+        point_datasets=ctx.deps.point_datasets,
     )
+
+
+async def find_area_features(ctx: RunContext[AgentDeps], request: AreaSearchRequest) -> list[AreaMatch]:
+    """Find OSM features of any category — restaurants, bus stops, police stations, parks, lakes, bases, etc. — within a scope, independent of any route.
+
+    Use this for open-ended "show me all X near/in/between ..." requests, for any category, not
+    just polygon "area" features — most categories (restaurants, bus stops, police stations, ...)
+    come back as points; a smaller set (parks, lakes, malls, bases, ...) come back as polygons with
+    a real boundary, area_m2, and exit_count (see AreaMatch). Unlike search_routes'
+    through_categories/through_raw_tags (which only count a match when an already-*planned route*
+    physically crosses that polygon — a much stricter, often-empty condition since most routes go
+    around a park rather than through it), this searches for every matching feature within the
+    scope directly, whether or not any route has been or will be planned.
+
+    Scope is exactly one of:
+    - request.origin + request.radius_m — "near a point".
+    - request.boundary — "anywhere within this area". Geocode the place first and pass its
+      GeocodeResult.boundary when the person names a city/county/park/etc. rather than
+      approximating it with a radius; only fall back to origin/radius_m when geocode returns no
+      boundary for that place (e.g. it's an address or POI, not an administrative/area feature).
+    - request.origin + request.destination + request.corridor_m — "between A and B" (e.g. "parks
+      between Falls Church and Rosslyn"). Geocode both places first. Use this scope for "between"/
+      "along the way from X to Y" phrasing even when no route has been planned or asked for — don't
+      reach for search_routes just because two places were named; that tool is for routing
+      decisions, not for listing what's in the area between two points.
+
+    Configure request.way_types (OSM highway= tag values, e.g. ['path', 'footway', 'track'] for
+    trails/paths, or ['residential', 'service'] for small roads — same OSM tagging convention as
+    find_nearby_poi's raw_tags) and request.boundary_contact (crosses/touches/any) to control what
+    counts toward request.min_boundary_count (a feature's returned exit_count). Setting
+    min_area_m2/min_boundary_count narrows a result to only its polygon matches (e.g. "just the
+    parks with a small road touching their edge") — a point match never satisfies either, since it
+    has no area or boundary. Results are ranked with polygon matches first (largest area first),
+    then point matches. An empty result means nothing matched — say so rather than relaxing the
+    request's criteria yourself.
+    """
+    return await compute_area_search(request, areas=ctx.deps.areas)
 
 
 async def reroute(ctx: RunContext[AgentDeps], route_id: str, request: RerouteRequest) -> Route:
@@ -154,11 +208,17 @@ async def reroute(ctx: RunContext[AgentDeps], route_id: str, request: RerouteReq
     To add or remove a stop on an existing route, geocode the place if needed, then pass
     request.waypoints as the prior route's waypoints (visible on the earlier Route output)
     with the stop inserted/removed at the desired position — omit request.waypoints to leave
-    stops unchanged when only adjusting avoidance constraints.
+    stops unchanged when only adjusting avoidance constraints. To actually route around an
+    uploaded point dataset's features (e.g. 'avoid known camera locations'), rather than just
+    reporting them, set request.avoid.avoid_point_datasets.
     """
     prior_route = await ctx.deps.routes.get_route_by_id(route_id)
     if prior_route is None:
         raise ModelRetry(f"No route found with id {route_id!r}. Double-check the id, or plan_route again if needed.")
+    resolved_avoid = await resolve_avoid(
+        request.avoid, route_geometry_line(prior_route.geometry), ctx.deps.point_datasets
+    )
+    request = request.model_copy(update={"avoid": resolved_avoid})
     try:
         new_route = await ctx.deps.routing.compute_reroute(prior_route, request)
     except ValueError as exc:
@@ -354,7 +414,11 @@ async def find_point_dataset_along_route(
     """Find features from an uploaded point dataset within a corridor around a previously planned route.
 
     Use this to answer questions like 'how many camera lights do I pass on this route' —
-    call list_point_datasets first if you don't already know the right dataset_id.
+    call list_point_datasets first if you don't already know the right dataset_id; its response
+    also lists each dataset's actual tags (e.g. 'indoor', 'verified'). If the person qualifies the
+    request with a distinction those tags capture (e.g. 'avoid the indoor ones', 'only the verified
+    cameras'), use request.include_tags/exclude_tags to honor it rather than silently ignoring the
+    qualifier and returning every feature regardless of it.
     """
     route = await ctx.deps.routes.get_route_by_id(route_id)
     if route is None:
@@ -372,9 +436,10 @@ async def update_map_locations(request: UpdateMapLocationsRequest) -> UpdateMapL
     """Control what location markers are currently shown on the user's map, alongside the chat.
 
     This is the only way search results become visible on the map — geocode, find_nearby_poi,
-    find_poi_along_route, find_frequented_locations, find_point_dataset_along_route, and
-    save_location_label all return data to you, but plotting it is a separate, deliberate step
-    via this tool. Call it whenever a location-surfacing tool's results are worth showing:
+    find_poi_along_route, find_area_features, find_frequented_locations,
+    find_point_dataset_along_route, and save_location_label all return data to you, but plotting
+    it is a separate, deliberate step via this tool. Call it whenever a location-surfacing tool's
+    results are worth showing:
 
     - action="replace": clear everything currently on the map and show exactly `locations`
       instead. Use this for a new search/topic change, or when the person's follow-on message
@@ -390,15 +455,18 @@ async def update_map_locations(request: UpdateMapLocationsRequest) -> UpdateMapL
 
     Always fill in `properties` with whatever raw detail the source tool gave you (geocode's
     osm_type/osm_id/osm_class/url/address; find_nearby_poi's/find_poi_along_route's osm_type/
-    osm_id/url/raw_tags; an AreaMatch's osm_type/osm_id/url/raw_tags from search_routes'
-    through_categories/through_raw_tags) — flatten nested fields to string key/value pairs. The
-    user can open a marker to inspect this, so don't summarize it away to just a name and a pin.
+    osm_id/url/raw_tags; an AreaMatch's osm_type/osm_id/url/raw_tags from find_area_features or
+    search_routes' through_categories/through_raw_tags) — flatten nested fields to string
+    key/value pairs. The user can open a marker to inspect this, so don't summarize it away to
+    just a name and a pin.
 
-    This tool is points only — `locations[].geometry` must be a Point, so plot an area feature
-    (e.g. a park matched via through_categories) at its centroid. Carrying its osm_type/osm_id
-    into `properties` still identifies the real polygon/relation behind that point, so later in
-    the conversation you (or the user) can refer back to that exact area by id rather than
-    re-searching by name. Planned routes are a different, already-automatic thing: plan_route/
+    `locations[].geometry` accepts either a Point or a Polygon — pass an AreaMatch's geometry
+    (from find_area_features or search_routes' matched_area) exactly as returned: most matches are
+    already a Point, and a polygon match (a park, lake, mall, etc.) should be passed as its actual
+    Polygon rather than flattened to a centroid, so the user sees its real shape and extent on the
+    map. Carry its osm_type/osm_id into `properties` either way, so later in the conversation you
+    (or the user) can refer back to that exact feature by id rather than re-searching by name. Planned
+    routes are a different, already-automatic thing: plan_route/
     reroute/search_routes results are drawn on the map on their own the moment you return them,
     so never pass a route's LineString geometry here, and don't call this tool again just to
     "add" a route you already planned.

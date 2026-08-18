@@ -36,6 +36,7 @@ from pydantic_ai.messages import (
     PartDeltaEvent,
     PartEndEvent,
     PartStartEvent,
+    RetryPromptPart,
     TextPart,
     TextPartDelta,
     ThinkingPart,
@@ -74,13 +75,15 @@ UI_MESSAGE_STREAM_HEADERS = {
     "x-accel-buffering": "no",
 }
 
-# Appended after the exception message in an "error" chunk's errorText, ahead of the full
-# traceback — the frontend splits on this to show a short message with the trace collapsed.
+# Appended after the short message in an "error" chunk's errorText or a "data-log" chunk's
+# message, ahead of extra detail (a full traceback, or a retry's underlying response body) —
+# the frontend splits on this to show the short message with the detail collapsed.
 TRACE_MARKER = "---TRACEBACK---"
 
 # Transient model-provider failures worth waiting out rather than failing the turn:
-# rate limits (429) and momentary overload (503/529, the latter Anthropic-specific).
-RETRYABLE_MODEL_STATUS_CODES = {429, 503, 529}
+# momentary overload (503/529, the latter Anthropic-specific). 429s are excluded —
+# retrying a rate limit just burns another attempt against the same limit.
+RETRYABLE_MODEL_STATUS_CODES = {503, 529}
 MAX_MODEL_RETRIES = 2
 DEFAULT_MODEL_RETRY_SECONDS = 5.0
 MAX_MODEL_RETRY_SECONDS = 60.0
@@ -186,7 +189,7 @@ def get_agent_config() -> AgentConfig:
 
 @lru_cache(maxsize=1)
 def get_nominatim_client() -> NominatimClient:
-    return NominatimClient(config=settings.nominatim, osm_website_url=settings.osm_website_url)
+    return NominatimClient(config=settings.nominatim)
 
 
 class _UIMessageStreamTranslator:
@@ -253,6 +256,18 @@ class _UIMessageStreamTranslator:
                         # tool" part (type: dynamic-tool) rather than a static tool-<name> part —
                         # without this flag the chunk is accepted but silently renders as a part
                         # type the UI never checks for.
+                        "dynamic": True,
+                    }
+                ]
+            # A RetryPromptPart means the tool call failed (bad arguments, or the tool raised
+            # ModelRetry) and the model is being asked to try again — surface it as an error,
+            # not a success, so the UI doesn't show a failed call as "Completed".
+            case FunctionToolResultEvent(part=RetryPromptPart() as part):
+                return [
+                    {
+                        "type": "tool-output-error",
+                        "toolCallId": part.tool_call_id,
+                        "errorText": part.model_response(),
                         "dynamic": True,
                     }
                 ]
@@ -354,11 +369,19 @@ async def chat(
                             raise
                         attempt += 1
                         wait_seconds = min(exc.retry_after or DEFAULT_MODEL_RETRY_SECONDS, MAX_MODEL_RETRY_SECONDS)
-                        logger.warning(
+                        log_message = (
                             f"Model provider returned {exc.status_code}; retrying in "
                             f"{wait_seconds:.0f}s (attempt {attempt}/{MAX_MODEL_RETRIES})"
                         )
+                        if exc.body is not None:
+                            log_message = f"{log_message}\n{TRACE_MARKER}\nmodel: {exc.model_name}\nbody: {exc.body}"
+                        logger.warning(log_message)
                         await asyncio.sleep(wait_seconds)
+                # Retried warnings sit in the transcript with no resolution otherwise — log
+                # explicitly that the turn recovered rather than leaving the last thing the
+                # user saw be an unresolved "retrying" line.
+                if attempt:
+                    logger.info(f"Model provider recovered after {attempt} retr{'y' if attempt == 1 else 'ies'}")
             await chat_repository.save_message_history(
                 session.id, result.all_messages()
             )

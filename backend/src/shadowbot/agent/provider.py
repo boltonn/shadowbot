@@ -7,6 +7,7 @@ local server.
 
 from enum import StrEnum
 
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -93,8 +94,14 @@ def build_model(settings: LLMSettings) -> Model:
             provider=GoogleProvider(api_key=settings.api_key, base_url=settings.base_url),
         )
     if settings.provider == LLMProvider.OPENAI_COMPATIBLE:
+        # The openai SDK retries 429s internally (max_retries=2) before pydantic-ai ever
+        # sees the error, bypassing our own no-retry-on-429 handling in the agent route.
+        # Disable it here so a 429 surfaces immediately, same as the other providers.
+        openai_client = AsyncOpenAI(
+            api_key=settings.api_key, base_url=settings.base_url, max_retries=0
+        )
         return OpenAIChatModel(
             settings.model,
-            provider=OpenAIProvider(api_key=settings.api_key, base_url=settings.base_url),
+            provider=OpenAIProvider(openai_client=openai_client),
         )
     raise ValueError(f"Unsupported LLM provider: {settings.provider}")

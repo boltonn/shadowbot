@@ -8,6 +8,7 @@ import {
   Coffee,
   CircleDot,
   Dumbbell,
+  Flag,
   Fuel,
   History,
   Home,
@@ -69,6 +70,9 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   home: Home,
   work: Briefcase,
   custom: CircleDot,
+  // Pinned route stops, from the routing tab's origin/destination fields.
+  waypoint: MapPin,
+  destination: Flag,
 };
 
 /** Categories with a dedicated icon — offered as suggestions when uploading a point dataset. */
@@ -99,6 +103,20 @@ function defaultColorForCategory(category: string): string {
  */
 export function colorForCategory(category: string, overrides: Record<string, string> = {}): string {
   return overrides[category.toLowerCase()] ?? defaultColorForCategory(category);
+}
+
+/**
+ * Resolves a single location's display color: its own override if one's been set (see
+ * category-color-store.ts's locationOverrides) takes precedence over the category-wide one,
+ * so changing one point's color doesn't repaint every other point of the same category.
+ */
+export function colorForLocation(
+  id: string,
+  category: string,
+  categoryOverrides: Record<string, string> = {},
+  locationOverrides: Record<string, string> = {},
+): string {
+  return locationOverrides[id] ?? colorForCategory(category, categoryOverrides);
 }
 
 /** A MapLibre `match` expression coloring circle markers by their `category` property. */

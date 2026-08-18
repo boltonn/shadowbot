@@ -70,9 +70,9 @@ export function ActivityRail({
         <Image
           src="/logo.png"
           alt="Shadowbot"
-          width={32}
-          height={32}
-          className="size-8 shrink-0 rounded-full"
+          width={40}
+          height={40}
+          className="size-10 shrink-0 rounded-full"
         />
       </div>
       <div className="flex flex-1 flex-col items-center gap-2 py-3">

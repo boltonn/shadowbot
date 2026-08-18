@@ -9,6 +9,11 @@ export type MapStyleOption = {
 
 export const MAP_STYLE_OPTIONS: MapStyleOption[] = [
   {
+    id: "openfreemap-liberty",
+    label: "OpenFreeMap Liberty (3D buildings)",
+    url: "https://tiles.openfreemap.org/styles/liberty",
+  },
+  {
     id: "openfreemap-dark",
     label: "OpenFreeMap Dark",
     url: process.env.NEXT_PUBLIC_MAP_STYLE_DARK ?? "https://tiles.openfreemap.org/styles/dark",

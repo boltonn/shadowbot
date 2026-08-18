@@ -7,9 +7,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { useCategoryColorStore } from "@/features/geodata/category-color-store";
 import { useUploadPointDataset } from "@/features/geodata/hooks/use-upload-point-dataset";
-import { colorForCategory, iconForCategory } from "@/features/geodata/lib/category-icons";
+import { colorForLocation, iconForCategory } from "@/features/geodata/lib/category-icons";
 import type { ChatLocation } from "@/features/map/types";
 import { useMapStore } from "@/features/map/store";
+import { centroidOf } from "@/features/map/lib/geometry";
 import { formatDistance, formatDuration } from "@/features/routing/lib/format";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -18,13 +19,17 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Bundles the currently plotted chat locations into a GeoJSON file the existing upload flow can ingest. */
+/**
+ * Bundles the currently plotted chat locations into a GeoJSON file the existing upload flow can
+ * ingest. Uploads as a *point* dataset, so a Polygon location (e.g. an area match) degrades to a
+ * Point at its centroid rather than keeping its full boundary.
+ */
 function chatLocationsToFile(locations: ChatLocation[]): File {
   const featureCollection = {
     type: "FeatureCollection" as const,
     features: locations.map((location) => ({
       type: "Feature" as const,
-      geometry: { type: "Point" as const, coordinates: [location.longitude, location.latitude] },
+      geometry: { type: "Point" as const, coordinates: centroidOf(location.geometry) },
       properties: { kind: location.kind, name: location.label, ...location.properties },
     })),
   };
@@ -87,11 +92,12 @@ function LiveLocationRow({
   onRemove: () => void;
 }) {
   const overrides = useCategoryColorStore((state) => state.overrides);
-  const setCategoryColor = useCategoryColorStore((state) => state.setCategoryColor);
+  const locationOverrides = useCategoryColorStore((state) => state.locationOverrides);
+  const setLocationColor = useCategoryColorStore((state) => state.setLocationColor);
   const renameChatLocation = useMapStore((state) => state.renameChatLocation);
   const [editing, setEditing] = useState(false);
   const Icon = iconForCategory(location.kind);
-  const color = colorForCategory(location.kind, overrides);
+  const color = colorForLocation(location.id, location.kind, overrides, locationOverrides);
 
   return (
     <li className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0">
@@ -119,8 +125,8 @@ function LiveLocationRow({
       <input
         type="color"
         value={color}
-        onChange={(e) => setCategoryColor(location.kind, e.target.value)}
-        aria-label={`Color for ${location.kind}`}
+        onChange={(e) => setLocationColor(location.id, e.target.value)}
+        aria-label={`Color for ${location.label}`}
         className="size-3.5 shrink-0 cursor-pointer rounded-sm border-none bg-transparent p-0"
       />
       <Button

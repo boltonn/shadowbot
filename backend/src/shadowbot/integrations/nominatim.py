@@ -4,11 +4,15 @@ import re
 from pathlib import Path
 
 import httpx
-from geojson_pydantic import Point
+from geojson_pydantic import MultiPolygon, Point, Polygon
 from geojson_pydantic.types import Position2D
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from shadowbot.schemas.routing import GeocodeRequest, GeocodeResult
+
+_BOUNDARY_GEOJSON_TYPES = {"Polygon", "MultiPolygon"}
+
+_OSM_TYPE_PREFIXES = {"node": "N", "way": "W", "relation": "R"}
 
 _ZIP_PATTERN = re.compile(r"\b\d{5}(-\d{4})?\b")
 _STREET_SUFFIXES = (
@@ -54,13 +58,17 @@ class NominatimConfig(BaseModel):
 
     model_config = {"frozen": True}
 
+    @field_validator("nominatim_url")
+    @classmethod
+    def _strip_trailing_slash(cls, value: str) -> str:
+        return value.rstrip("/")
+
 
 class NominatimClient:
-    """Thin async wrapper around a Nominatim /search endpoint."""
+    """Thin async wrapper around Nominatim's /search and /lookup endpoints."""
 
-    def __init__(self, config: NominatimConfig, osm_website_url: str):
+    def __init__(self, config: NominatimConfig):
         self.config = config
-        self.osm_website_url = osm_website_url
 
     async def geocode(self, request: GeocodeRequest) -> list[GeocodeResult]:
         """Resolve a free-text query into candidate locations.
@@ -76,25 +84,44 @@ class NominatimClient:
             return results
         return await self._search(fallback_query, request.limit)
 
-    async def _search(self, query: str, limit: int) -> list[GeocodeResult]:
-        async with httpx.AsyncClient(
-            headers={"User-Agent": self.config.user_agent},
-            cert=self._httpx_cert(),
-            verify=self._httpx_verify(),
-        ) as client:
+    async def lookup(self, elements: list[tuple[str, int]]) -> list[GeocodeResult]:
+        """Fetch canonical data for specific OSM elements by (osm_type, osm_id), via Nominatim's /lookup endpoint.
+
+        Unlike geocode, this doesn't fuzzy-match free text — it resolves the exact elements
+        requested, e.g. to pull full display_name/address/geometry for an osm_type/osm_id already
+        returned by a prior geocode, POI, or area-feature result.
+        """
+        osm_ids = ",".join(f"{_OSM_TYPE_PREFIXES[osm_type]}{osm_id}" for osm_type, osm_id in elements)
+        async with self._client() as client:
             response = await client.get(
-                f"{self.config.nominatim_url.rstrip('/')}/search",
-                params={"q": query, "format": "jsonv2", "limit": limit, "addressdetails": 1},
+                f"{self.config.nominatim_url}/lookup",
+                params={"osm_ids": osm_ids, "format": "jsonv2", "addressdetails": 1, "polygon_geojson": 1},
             )
             response.raise_for_status()
             results = response.json()
 
         return [self._to_geocode_result(result) for result in results]
 
+    async def _search(self, query: str, limit: int) -> list[GeocodeResult]:
+        async with self._client() as client:
+            response = await client.get(
+                f"{self.config.nominatim_url}/search",
+                params={"q": query, "format": "jsonv2", "limit": limit, "addressdetails": 1, "polygon_geojson": 1},
+            )
+            response.raise_for_status()
+            results = response.json()
+
+        return [self._to_geocode_result(result) for result in results]
+
+    def _client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            headers={"User-Agent": self.config.user_agent},
+            cert=self._httpx_cert(),
+            verify=self._httpx_verify(),
+        )
+
     def _to_geocode_result(self, result: dict) -> GeocodeResult:
         """Map a raw Nominatim jsonv2 result to a GeocodeResult, keeping its OSM identity and address."""
-        osm_type = result.get("osm_type")
-        osm_id = result.get("osm_id")
         return GeocodeResult(
             display_name=result["display_name"],
             geometry=Point(
@@ -102,14 +129,22 @@ class NominatimClient:
                 coordinates=Position2D(longitude=float(result["lon"]), latitude=float(result["lat"])),
             ),
             place_type=result.get("type"),
-            osm_type=osm_type,
-            osm_id=osm_id,
+            osm_type=result.get("osm_type"),
+            osm_id=result.get("osm_id"),
             # Newer Nominatim renamed jsonv2's "class" field to "category" — accept either
             # so this still works against an older self-hosted instance.
             osm_class=result.get("category") or result.get("class"),
             address={k: str(v) for k, v in (result.get("address") or {}).items()},
-            url=f"{self.osm_website_url.rstrip('/')}/{osm_type}/{osm_id}" if osm_type and osm_id else None,
+            boundary=self._to_boundary(result.get("geojson")),
         )
+
+    def _to_boundary(self, geojson: dict | None) -> Polygon | MultiPolygon | None:
+        """A result's real area boundary, when Nominatim's geojson is a Polygon/MultiPolygon rather than a point/line."""
+        if geojson is None or geojson.get("type") not in _BOUNDARY_GEOJSON_TYPES:
+            return None
+        if geojson["type"] == "Polygon":
+            return Polygon(**geojson)
+        return MultiPolygon(**geojson)
 
     def _httpx_cert(self) -> str | tuple[str, str] | None:
         if self.config.cert is None:

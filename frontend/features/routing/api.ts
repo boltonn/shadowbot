@@ -1,5 +1,7 @@
 import { apiClient } from "@/lib/api-client";
 import type {
+  AreaMatch,
+  AreaSearchRequest,
   ArrivalEstimate,
   ArrivalEstimateRequest,
   RerouteRequest,
@@ -21,6 +23,11 @@ export async function reroute(routeId: string, body: RerouteRequest): Promise<Ro
 
 export async function searchRoutes(body: RouteSearchCriteria): Promise<RouteSearchMatch[]> {
   const response = await apiClient.post<RouteSearchMatch[]>("/routes/search", body);
+  return response.data;
+}
+
+export async function searchAreas(body: AreaSearchRequest): Promise<AreaMatch[]> {
+  const response = await apiClient.post<AreaMatch[]>("/areas/search", body);
   return response.data;
 }
 

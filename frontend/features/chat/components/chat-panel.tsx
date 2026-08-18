@@ -36,6 +36,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useApiKeyStore } from "@/features/chat/api-key-store";
 import { useModelSelector } from "@/features/chat/hooks/use-model-selector";
+import { describeToolCall } from "@/features/chat/lib/tool-descriptions";
 import { useSyncChatLocationsToMap } from "@/features/chat/hooks/use-sync-chat-locations";
 import { useSyncChatRouteToMap } from "@/features/chat/hooks/use-sync-chat-route";
 import { useSyncChatSearchRoutesToMap } from "@/features/chat/hooks/use-sync-chat-search-routes";
@@ -61,8 +62,9 @@ function isAuthError(message: string) {
   return /api[_ ]?key|authenticat/i.test(message);
 }
 
-// Matches the backend's TRACE_MARKER in api/routes/agent.py — splits an error's short
-// message from the full traceback appended after it, so the trace can render collapsed.
+// Matches the backend's TRACE_MARKER in api/routes/agent.py — splits a message's short summary
+// from extra detail appended after it (a full traceback, or a retry's response body), so the
+// detail can render collapsed rather than always being shown inline.
 const TRACE_MARKER = "---TRACEBACK---";
 
 function splitErrorTrace(message: string): { summary: string; trace?: string } {
@@ -161,6 +163,35 @@ export function ChatPanel({
   );
   const showThinkingIndicator =
     isBusy && !(status === "streaming" && lastMessageHasText);
+
+  // The last tool call that hasn't resolved yet, if any — gives the map HUD something more
+  // useful to show than a bare spinner while a slow tool call (or a stalled LLM request) is
+  // in flight and the map itself has no other way to indicate that.
+  const activeToolPart = [...(lastMessage?.parts ?? [])]
+    .reverse()
+    .find(
+      (part): part is Extract<typeof part, { type: "dynamic-tool" }> =>
+        part.type === "dynamic-tool" &&
+        part.state !== "output-available" &&
+        part.state !== "output-error",
+    );
+  const agentBusyLabel = activeToolPart
+    ? `Running ${activeToolPart.toolName}…`
+    : isBusy
+      ? "Thinking…"
+      : null;
+
+  // Mirrors isBusy/agentBusyLabel into the map store so MapHud — a sibling of this panel, not
+  // a descendant — can show it too; computed during render rather than in an Effect, same as
+  // the error-handling sync below.
+  const [lastSyncedBusy, setLastSyncedBusy] = useState<{
+    busy: boolean;
+    label: string | null;
+  }>({ busy: false, label: null });
+  if (isBusy !== lastSyncedBusy.busy || agentBusyLabel !== lastSyncedBusy.label) {
+    setLastSyncedBusy({ busy: isBusy, label: agentBusyLabel });
+    useMapStore.getState().setAgentBusy(isBusy, agentBusyLabel);
+  }
 
   const handleSend = () => {
     const text = input.trim();
@@ -328,6 +359,10 @@ export function ChatPanel({
                             type="dynamic-tool"
                             toolName={part.toolName}
                             state={part.state}
+                            title={describeToolCall(
+                              part.toolName,
+                              "input" in part ? part.input : undefined,
+                            )}
                           />
                           <ToolContent>
                             <ToolInput
@@ -346,6 +381,9 @@ export function ChatPanel({
                       );
                     }
                     if (part.type === "data-log" && isLogData(part.data)) {
+                      const { summary, trace: detail } = splitErrorTrace(
+                        part.data.message,
+                      );
                       return (
                         <div
                           key={part.id ?? index}
@@ -355,7 +393,24 @@ export function ChatPanel({
                               "text-muted-foreground",
                           )}
                         >
-                          {part.data.message}
+                          <span className="whitespace-pre-wrap">
+                            {summary}
+                          </span>
+                          {detail && (
+                            <Collapsible className="group mt-1">
+                              <CollapsibleTrigger className="flex items-center gap-1 text-[10px] opacity-70 hover:opacity-100">
+                                Show details
+                                <ChevronDownIcon className="size-3 transition-transform group-data-[state=open]:rotate-180" />
+                              </CollapsibleTrigger>
+                              <CollapsibleContent className="mt-1">
+                                <CodeBlock
+                                  code={detail}
+                                  language="console"
+                                  className="text-[10px]"
+                                />
+                              </CollapsibleContent>
+                            </Collapsible>
+                          )}
                         </div>
                       );
                     }

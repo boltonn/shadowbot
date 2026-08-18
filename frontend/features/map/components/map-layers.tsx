@@ -13,6 +13,8 @@ import { FeatureInspector } from "@/features/geodata/components/feature-inspecto
 import { DatasetPointPickLayer } from "@/features/geodata/components/dataset-point-pick-layer";
 import { CreateFeatureDialog } from "@/features/geodata/components/create-feature-dialog";
 import { ChatLocationMarkers } from "@/features/map/components/chat-location-markers";
+import { ChatLocationPolygons } from "@/features/map/components/chat-location-polygons";
+import { MatchedAreasLayer } from "@/features/map/components/matched-areas-layer";
 import { AreaSelectLayer } from "@/features/map/components/area-select-layer";
 
 export function MapLayers() {
@@ -21,6 +23,7 @@ export function MapLayers() {
   const selectAlternate = useMapStore((state) => state.selectAlternate);
   const matchedRoutes = useMapStore((state) => state.matchedRoutes);
   const selectMatchedRoute = useMapStore((state) => state.selectMatchedRoute);
+  const matchedAreas = useMapStore((state) => state.matchedAreas);
   const visibleDatasetIds = useMapStore((state) => state.visibleDatasetIds);
   const routeFocusToken = useMapStore((state) => state.routeFocusToken);
 
@@ -35,6 +38,11 @@ export function MapLayers() {
     if (!map || matchedRoutes.length === 0) return;
     fitToCoordinates(map, matchedRoutes.flatMap((match) => match.route.geometry.coordinates as [number, number][]));
   }, [map, matchedRoutes]);
+
+  useEffect(() => {
+    if (!map || matchedAreas.length === 0) return;
+    fitToCoordinates(map, matchedAreas.flatMap((area) => area.geometry.coordinates[0] as [number, number][]));
+  }, [map, matchedAreas]);
 
   return (
     <>
@@ -82,6 +90,8 @@ export function MapLayers() {
       ))}
       <PointDatasetLegend />
       <ChatLocationMarkers />
+      <ChatLocationPolygons />
+      <MatchedAreasLayer />
       <FeatureInspector />
       <DatasetPointPickLayer />
       <CreateFeatureDialog />

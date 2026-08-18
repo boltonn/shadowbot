@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from shapely.geometry import shape
+from shapely.geometry.base import BaseGeometry
 from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,15 @@ from shadowbot.schemas.routing import Route
 # Good enough for a single-region prototype without a projected-CRS round trip — matches
 # the same tradeoff PoiRepository.find_along_route makes for its own corridor buffer.
 _METERS_PER_DEGREE = 111_320
+
+
+def _matches_tag_filters(point: PointFeature, category: str | None, include_tags: set[str], exclude_tags: set[str]) -> bool:
+    if category and point.category != category:
+        return False
+    point_tags = set(point.tags)
+    if include_tags and not (point_tags & include_tags):
+        return False
+    return not (exclude_tags and point_tags & exclude_tags)
 
 
 class PostgresPointDatasetRepository:
@@ -133,9 +143,11 @@ class PostgresPointDatasetRepository:
             return []
 
         route_line = shape(route.geometry.model_dump(mode="json"))
+        include_tags = set(request.include_tags)
+        exclude_tags = set(request.exclude_tags)
         results = []
         for point in dataset.points:
-            if request.category and point.category != request.category:
+            if not _matches_tag_filters(point, request.category, include_tags, exclude_tags):
                 continue
             distance_m = route_line.distance(shape(point.geometry.model_dump(mode="json"))) * _METERS_PER_DEGREE
             if distance_m <= request.corridor_m:
@@ -143,6 +155,35 @@ class PostgresPointDatasetRepository:
 
         results.sort(key=lambda point: point.distance_m)
         return results[: request.limit]
+
+    async def find_near_line(
+        self,
+        dataset_id: str,
+        line: BaseGeometry,
+        corridor_m: float,
+        category: str | None,
+        include_tags: list[str],
+        exclude_tags: list[str],
+        limit: int,
+    ) -> list[PointFeature]:
+        """Find a dataset's matching features within corridor_m of an arbitrary line.
+
+        E.g. a straight origin-destination line, before any route has actually been computed.
+        """
+        dataset = await self.get_point_dataset_by_id(dataset_id)
+        if dataset is None:
+            return []
+
+        include_set = set(include_tags)
+        exclude_set = set(exclude_tags)
+        results = []
+        for point in dataset.points:
+            if not _matches_tag_filters(point, category, include_set, exclude_set):
+                continue
+            distance_m = line.distance(shape(point.geometry.model_dump(mode="json"))) * _METERS_PER_DEGREE
+            if distance_m <= corridor_m:
+                results.append(point)
+        return results[:limit]
 
     async def add_feature(self, dataset_id: str, request: PointFeatureCreate) -> PointFeature:
         """Add a single feature to an existing point dataset."""

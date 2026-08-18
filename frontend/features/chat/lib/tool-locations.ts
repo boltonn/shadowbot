@@ -1,3 +1,4 @@
+import type { Point, Polygon } from "geojson";
 import type { ChatLocation, ChatLocationAction } from "@/features/map/types";
 
 const UPDATE_MAP_LOCATIONS_TOOL = "update_map_locations";
@@ -10,17 +11,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function pointCoordinates(geometry: unknown): [number, number] | null {
-  if (!isRecord(geometry)) return null;
-  const coordinates = geometry.coordinates;
-  if (
-    !Array.isArray(coordinates) ||
-    typeof coordinates[0] !== "number" ||
-    typeof coordinates[1] !== "number"
-  ) {
-    return null;
+function isPosition(value: unknown): value is number[] {
+  return Array.isArray(value) && typeof value[0] === "number" && typeof value[1] === "number";
+}
+
+/** Validates a Point or Polygon geometry (the only two shapes update_map_locations sends). */
+function toGeometry(geometry: unknown): Point | Polygon | null {
+  if (!isRecord(geometry) || typeof geometry.type !== "string") return null;
+  if (geometry.type === "Point" && isPosition(geometry.coordinates)) {
+    return geometry as unknown as Point;
   }
-  return [coordinates[0], coordinates[1]];
+  if (
+    geometry.type === "Polygon" &&
+    Array.isArray(geometry.coordinates) &&
+    geometry.coordinates.every((ring) => Array.isArray(ring) && ring.every(isPosition))
+  ) {
+    return geometry as unknown as Polygon;
+  }
+  return null;
 }
 
 function stringRecord(value: unknown): Record<string, string> {
@@ -34,15 +42,14 @@ function stringRecord(value: unknown): Record<string, string> {
 
 function toChatLocation(item: unknown): ChatLocation | null {
   if (!isRecord(item)) return null;
-  const coords = pointCoordinates(item.geometry);
-  if (!coords) return null;
+  const geometry = toGeometry(item.geometry);
+  if (!geometry) return null;
   if (typeof item.id !== "string" || typeof item.kind !== "string" || typeof item.label !== "string") return null;
   return {
     id: item.id,
     kind: item.kind,
     label: item.label,
-    longitude: coords[0],
-    latitude: coords[1],
+    geometry,
     properties: stringRecord(item.properties),
   };
 }

@@ -7,6 +7,7 @@ from shadowbot.agent.tools import (
     AgentDeps,
     compare_routes,
     estimate_arrival,
+    find_area_features,
     find_frequented_locations,
     find_nearby_poi,
     find_poi_along_route,
@@ -81,8 +82,20 @@ SYSTEM_PROMPT = (
     "For questions about a category not in your OSM POI list (e.g. 'how many camera lights do I pass "
     "on this route'), use list_point_datasets to find the right uploaded dataset, then "
     "find_point_dataset_along_route with that route's id — don't say this is unsupported without "
-    "checking whether the user has uploaded relevant data first. When someone describes constraints "
-    "a single planned route can't satisfy directly — a travel mode, one or more named places/roads "
+    "checking whether the user has uploaded relevant data first. If they qualify the request with a "
+    "distinction the dataset's tags capture (list_point_datasets shows each dataset's actual tags) — "
+    "e.g. 'avoid the indoor ones', 'skip the decommissioned cameras' — pass that as "
+    "request.include_tags/exclude_tags rather than returning every feature and ignoring the "
+    "qualifier; a category alone (request.category) can't express a tag-based distinction. "
+    "find_point_dataset_along_route only ever reports what's near a route — it never changes it. "
+    "When the person actually wants to route around a dataset's features ('avoid cameras', 'avoid "
+    "known speed traps'), that's a different, stronger ask: set avoid.avoid_point_datasets on "
+    "plan_route/reroute/search_routes' request instead (dataset_id from list_point_datasets, plus "
+    "category/include_tags/exclude_tags for the same distinctions as above) — this actually buffers "
+    "every matching feature out of the computed route. Don't satisfy 'avoid cameras' by only calling "
+    "find_point_dataset_along_route and describing the count; that leaves the route unchanged. When "
+    "someone describes constraints a single planned route can't satisfy directly — a travel mode, "
+    "one or more named places/roads "
     "to avoid, and/or passing through an area feature (a park, lake, mall, etc.) of at least a given "
     "size and/or with more than one boundary crossing ('exit') — use search_routes rather than "
     "plan_route; it generates several candidates and returns only the ones meeting every criterion, "
@@ -90,7 +103,29 @@ SYSTEM_PROMPT = (
     "compare_routes/estimate_arrival. Use its through_raw_tags the same way you'd use find_nearby_poi's "
     "raw_tags for anything outside the curated category list — don't refuse a feature type just "
     "because it isn't park. If nothing matches, say so rather than silently dropping a criterion. "
-    "Search tools (geocode, find_nearby_poi, find_poi_along_route, find_frequented_locations, "
+    "When someone wants to see features themselves — of any category, not just polygon 'area' "
+    "features — rather than plan or evaluate a route, use find_area_features instead of "
+    "search_routes: 'show me parks near downtown with at least two trails through them', 'find "
+    "bases that connect to 2 small roads', 'restaurants between Tysons and DC', 'every police "
+    "station in Arlington'. This includes 'between A and B' / 'along the way from X to Y' phrasing "
+    "— naming two places is not by itself a request to plan a route; check whether the person "
+    "actually wants a route, or just wants to see what's in the area between two points. For the "
+    "latter, geocode both places and call find_area_features with origin+destination+corridor_m "
+    "(its between-two-points scope) rather than search_routes' through_categories/through_raw_tags, "
+    "which only match when an already-planned route happens to physically cross that feature — "
+    "most routes don't cross a park at all, so through_categories alone will usually come back "
+    "empty for this kind of ask even when the area genuinely has matching features. Configure its "
+    "way_types with raw OSM highway= values (e.g. path/footway/track for trails, residential/"
+    "service for small roads) and boundary_contact (crosses for a way passing through the feature, "
+    "touches for one that dead-ends at its edge, any for either) the same way search_routes' "
+    "through_way_types/through_boundary_contact work — don't leave way_types empty just because the "
+    "person named a specific kind of road or path; translate it into the matching highway values "
+    "yourself. Most categories (restaurants, bus stops, police stations, etc.) come back as points, "
+    "not polygons — that's normal, not a failure; only a smaller set (parks, lakes, malls, bases, "
+    "etc.) have a real boundary with area_m2/exit_count. A follow-on request like 'just the ones a "
+    "small road touches the edge of' only makes sense for, and only keeps, the polygon matches via "
+    "min_boundary_count/way_types/boundary_contact. "
+    "Search tools (geocode, find_nearby_poi, find_poi_along_route, find_area_features, find_frequented_locations, "
     "find_point_dataset_along_route, save_location_label) only return data to you — they never plot "
     "anything themselves. Whenever their results are worth showing the person, call "
     "update_map_locations to put them on the map: use action='replace' for a new search, a topic "
@@ -124,6 +159,7 @@ def build_agent(llm_settings: LLMSettings) -> Agent[AgentDeps, str]:
     agent.tool(get_isochrone)
     agent.tool(find_nearby_poi)
     agent.tool(find_poi_along_route)
+    agent.tool(find_area_features)
     agent.tool(list_tracks)
     agent.tool(get_track)
     agent.tool(match_track)

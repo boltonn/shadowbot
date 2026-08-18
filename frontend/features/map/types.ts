@@ -1,14 +1,16 @@
+import type { Point, Polygon } from "geojson";
+
 /**
  * A location the agent has explicitly chosen to plot via the update_map_locations tool.
  * `kind` is an icon category (see features/geodata/lib/category-icons.ts) — known values get
  * a dedicated icon, anything else (raw OSM "key=value" tags, etc.) falls back to a generic pin.
+ * `geometry` is a Point for most markers, or a Polygon for an area feature's actual boundary.
  */
 export type ChatLocation = {
   id: string;
   kind: string;
   label: string;
-  longitude: number;
-  latitude: number;
+  geometry: Point | Polygon;
   /** Raw element detail carried over from the source tool (osm_type/osm_id/url/address/raw_tags, etc.). */
   properties: Record<string, string>;
 };
