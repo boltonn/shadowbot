@@ -168,8 +168,8 @@ class AreaMatch(CamelModel):
     OSM; a smaller set (parks, lakes, malls, bases, etc.) are mapped as polygons and carry a real
     boundary. geometry reflects whichever OSM actually has — area_m2/exit_count are only meaningful,
     and only populated, for a polygon match, since a point has no area or boundary for a road to
-    touch. A request that filters on min_area_m2/min_boundary_count naturally keeps only polygon
-    matches, since point matches never satisfy either.
+    touch. A request that filters on min_area_m2/max_area_m2/min_boundary_count naturally keeps
+    only polygon matches, since point matches never satisfy any of them.
     """
 
     name: str | None = Field(default=None)
@@ -297,10 +297,12 @@ class AreaSearchRequest(_PoiTagFields):
     Scope is exactly one of: origin + radius_m (a radius around a point), boundary (everywhere
     within a polygon — a named place's administrative boundary from GeocodeResult.boundary, or a
     hand-drawn area), or origin + destination + corridor_m (a strip between two points, for
-    "between A and B" — independent of any actual planned route). To narrow a prior result to only
-    the ones with a real boundary meeting some condition (e.g. "just the ones a small road touches
-    the edge of"), set min_boundary_count/way_types/boundary_contact — this only ever keeps polygon
-    matches, since a point has no boundary to touch.
+    "between A and B" — independent of any actual planned route). For a size constraint (e.g. "parks
+    over 10 acres" or "parks under a quarter square mile"), set min_area_m2/max_area_m2 — convert
+    the person's units to square meters yourself; either or both may be set. To narrow a prior
+    result to only the ones with a real boundary meeting some condition (e.g. "just the ones a
+    small road touches the edge of"), set min_boundary_count/way_types/boundary_contact — this
+    only ever keeps polygon matches, since a point has no boundary to touch.
     """
 
     origin: Point | None = Field(
@@ -338,6 +340,7 @@ class AreaSearchRequest(_PoiTagFields):
         ),
     )
     min_area_m2: float | None = Field(default=None, gt=0, description="Minimum area of the matching feature")
+    max_area_m2: float | None = Field(default=None, gt=0, description="Maximum area of the matching feature")
     min_boundary_count: int | None = Field(
         default=None, ge=1, description="Minimum exit_count (see way_types/boundary_contact) of the matching feature"
     )
@@ -348,12 +351,16 @@ class AreaSearchRequest(_PoiTagFields):
         has_destination = self.destination is not None
         has_boundary = self.boundary is not None
         has_radius = self.radius_m is not None
+        if sum([has_radius, has_destination, has_boundary]) != 1:
+            raise ValueError(
+                "Exactly one of radius_m (a radius search), destination (a corridor search), "
+                "or boundary (a polygon search) must be set"
+            )
+        if has_boundary:
+            return self
+        # Only the radius/corridor scopes pin to a point — boundary is self-contained.
         if self.origin is None:
-            raise ValueError("origin is required, together with either radius_m, destination, or boundary")
-        if has_boundary and (has_destination or has_radius):
-            raise ValueError("Exactly one of radius_m, destination, or boundary must be set")
-        if has_destination == has_radius:
-            raise ValueError("Exactly one of radius_m (a radius search) or destination (a corridor search) must be set")
+            raise ValueError("origin is required, together with either radius_m or destination")
         if has_destination and self.corridor_m is None:
             raise ValueError("corridor_m is required when destination is set")
         return self

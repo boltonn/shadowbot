@@ -1,9 +1,10 @@
 """Schemas for agent-controlled location markers on the user's map."""
 
 from enum import StrEnum
+from typing import Any
 
 from geojson_pydantic import Point, Polygon
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from shadowbot.schemas.base import CamelModel
 
@@ -34,6 +35,18 @@ class MapLocation(CamelModel):
             "string key/value pairs. The user can inspect this on the map, so don't drop it."
         ),
     )
+
+    @field_validator("properties", mode="before")
+    @classmethod
+    def _stringify_property_values(cls, value: Any) -> Any:
+        """Coerces non-string property values so the agent can carry a source tool's fields over verbatim.
+
+        Handles osm_id as int, area_m2 as float, etc. — the agent shouldn't have to remember to
+        str() each one.
+        """
+        if not isinstance(value, dict):
+            return value
+        return {key: val if isinstance(val, str) else str(val) for key, val in value.items()}
 
 
 class UpdateMapLocationsRequest(CamelModel):

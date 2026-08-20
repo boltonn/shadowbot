@@ -36,6 +36,7 @@ const DEFAULT_CRITERIA: Criteria = {
   wayTypes: [],
   boundaryContact: "crosses",
   minAreaM2: null,
+  maxAreaM2: null,
   minBoundaryCount: null,
   limit: 5,
 };
@@ -328,6 +329,16 @@ export function LocationPanel() {
             min={0}
             value={criteria.minAreaM2 ?? ""}
             onChange={(e) => setCriteria({ ...criteria, minAreaM2: e.target.value ? Number(e.target.value) : null })}
+            className="h-8 text-sm"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs font-normal text-muted-foreground">Max area (m²)</Label>
+          <Input
+            type="number"
+            min={0}
+            value={criteria.maxAreaM2 ?? ""}
+            onChange={(e) => setCriteria({ ...criteria, maxAreaM2: e.target.value ? Number(e.target.value) : null })}
             className="h-8 text-sm"
           />
         </div>

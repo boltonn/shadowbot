@@ -36,6 +36,15 @@ class LLMSettings(BaseModel):
         default=None,
         description="Required for openai_compatible (e.g. a local server); optional override otherwise",
     )
+    tool_retries: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description=(
+            "How many times the agent may retry a tool call after a validation error or "
+            "ModelRetry before giving up and surfacing the failure to the user"
+        ),
+    )
 
     model_config = {"frozen": True}
 

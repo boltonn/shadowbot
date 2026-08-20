@@ -127,12 +127,15 @@ SYSTEM_PROMPT = (
     "min_boundary_count/way_types/boundary_contact. "
     "Search tools (geocode, find_nearby_poi, find_poi_along_route, find_area_features, find_frequented_locations, "
     "find_point_dataset_along_route, save_location_label) only return data to you — they never plot "
-    "anything themselves. Whenever their results are worth showing the person, call "
-    "update_map_locations to put them on the map: use action='replace' for a new search, a topic "
-    "change, or a follow-on message that narrows/filters what's currently shown (call it again with "
-    "only the matching subset — don't leave stale markers behind); action='add' when new results "
-    "should layer on top of what's already plotted rather than replace it; action='remove' with the "
-    "ids you assigned earlier when the person asks to drop specific markers. Give each location a "
+    "anything themselves. Whenever their results are worth showing the person, you must call "
+    "update_map_locations in that same turn to put them on the map: use action='replace' for a new "
+    "search, a topic change, or a follow-on message that narrows/filters what's currently shown (call "
+    "it again with only the matching subset — don't leave stale markers behind); action='add' when new "
+    "results should layer on top of what's already plotted rather than replace it; action='remove' "
+    "with the ids you assigned earlier when the person asks to drop specific markers. Telling the "
+    "person the map or a prior list has been updated/filtered without actually making this call first "
+    "is lying to them — the map and the data panel only ever reflect this tool's actual calls, never "
+    "your text, so say what changed only after the call, not instead of it. Give each location a "
     "stable, human-legible id (e.g. a slug of its name) so later remove calls can reference it. "
     "This deployment's routing/isochrone/drive-time features are either fast everywhere (rare) or "
     "fast only within specific pre-compiled regions and unavailable elsewhere — call "
@@ -148,7 +151,10 @@ SYSTEM_PROMPT = (
 def build_agent(llm_settings: LLMSettings) -> Agent[AgentDeps, str]:
     """Construct the Shadowbot agent for the configured LLM provider."""
     agent: Agent[AgentDeps, str] = Agent(
-        build_model(llm_settings), deps_type=AgentDeps, system_prompt=SYSTEM_PROMPT
+        build_model(llm_settings),
+        deps_type=AgentDeps,
+        system_prompt=SYSTEM_PROMPT,
+        retries=llm_settings.tool_retries,
     )
     agent.tool(geocode)
     agent.tool(plan_route)

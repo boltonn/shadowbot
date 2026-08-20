@@ -37,6 +37,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useApiKeyStore } from "@/features/chat/api-key-store";
 import { useModelSelector } from "@/features/chat/hooks/use-model-selector";
 import { describeToolCall } from "@/features/chat/lib/tool-descriptions";
+import { summarizeToolPayload } from "@/features/chat/lib/summarize-tool-payload";
 import { useSyncChatLocationsToMap } from "@/features/chat/hooks/use-sync-chat-locations";
 import { useSyncChatRouteToMap } from "@/features/chat/hooks/use-sync-chat-route";
 import { useSyncChatSearchRoutesToMap } from "@/features/chat/hooks/use-sync-chat-search-routes";
@@ -55,7 +56,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 function isAuthError(message: string) {
@@ -108,12 +109,6 @@ export function ChatPanel({
   const apiKey = useApiKeyStore((state) => state.apiKey);
   const openApiKeyDialog = useApiKeyStore((state) => state.openDialog);
   const { model, modelId } = useModelSelector();
-  const [lastPromptedModelId, setLastPromptedModelId] = useState<
-    string | undefined
-  >(undefined);
-  const [lastHandledError, setLastHandledError] = useState<Error | undefined>(
-    undefined,
-  );
 
   const transport = useMemo(
     () =>
@@ -182,16 +177,12 @@ export function ChatPanel({
       : null;
 
   // Mirrors isBusy/agentBusyLabel into the map store so MapHud — a sibling of this panel, not
-  // a descendant — can show it too; computed during render rather than in an Effect, same as
-  // the error-handling sync below.
-  const [lastSyncedBusy, setLastSyncedBusy] = useState<{
-    busy: boolean;
-    label: string | null;
-  }>({ busy: false, label: null });
-  if (isBusy !== lastSyncedBusy.busy || agentBusyLabel !== lastSyncedBusy.label) {
-    setLastSyncedBusy({ busy: isBusy, label: agentBusyLabel });
+  // a descendant — can show it too. This has to be an Effect rather than a during-render update:
+  // the "adjust state during render" pattern is only safe for state owned by the rendering
+  // component itself, not for setting a different store that another component subscribes to.
+  useEffect(() => {
     useMapStore.getState().setAgentBusy(isBusy, agentBusyLabel);
-  }
+  }, [isBusy, agentBusyLabel]);
 
   const handleSend = () => {
     const text = input.trim();
@@ -211,25 +202,25 @@ export function ChatPanel({
     useMapStore.getState().applyChatLocationsUpdate("replace", [], []);
   };
 
-  // Adjusting state in response to a prop/hook-state change, computed during render rather
-  // than in an Effect — see https://react.dev/learn/you-might-not-need-an-effect.
-  if (error !== lastHandledError) {
-    setLastHandledError(error);
+  // Opens the api-key-store's dialog when a request fails on auth — a different store than
+  // this component's own state, so it belongs in an Effect rather than a during-render update.
+  useEffect(() => {
     if (error && isAuthError(error.message)) {
       openApiKeyDialog();
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error]);
 
   // Prompt for a key up front rather than waiting for the first request to fail, if the
   // selected model has no server-side key and the user hasn't supplied one. Re-checked
   // whenever the selected model changes — a server key for one provider doesn't cover
   // every model in the picker (e.g. an Anthropic key doesn't authenticate Gemini).
-  if (modelId && modelId !== lastPromptedModelId) {
-    setLastPromptedModelId(modelId);
-    if (!apiKey && model && !model.hasKey) {
+  useEffect(() => {
+    if (modelId && !apiKey && model && !model.hasKey) {
       openApiKeyDialog();
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelId]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -366,11 +357,17 @@ export function ChatPanel({
                           />
                           <ToolContent>
                             <ToolInput
-                              input={"input" in part ? part.input : undefined}
+                              input={
+                                "input" in part
+                                  ? summarizeToolPayload(part.input)
+                                  : undefined
+                              }
                             />
                             <ToolOutput
                               output={
-                                "output" in part ? part.output : undefined
+                                "output" in part
+                                  ? summarizeToolPayload(part.output)
+                                  : undefined
                               }
                               errorText={
                                 "errorText" in part ? part.errorText : undefined

@@ -606,8 +606,8 @@ export interface components {
          *     OSM; a smaller set (parks, lakes, malls, bases, etc.) are mapped as polygons and carry a real
          *     boundary. geometry reflects whichever OSM actually has — area_m2/exit_count are only meaningful,
          *     and only populated, for a polygon match, since a point has no area or boundary for a road to
-         *     touch. A request that filters on min_area_m2/min_boundary_count naturally keeps only polygon
-         *     matches, since point matches never satisfy either.
+         *     touch. A request that filters on min_area_m2/max_area_m2/min_boundary_count naturally keeps
+         *     only polygon matches, since point matches never satisfy any of them.
          */
         AreaMatch: {
             /** Name */
@@ -664,10 +664,12 @@ export interface components {
          *     Scope is exactly one of: origin + radius_m (a radius around a point), boundary (everywhere
          *     within a polygon — a named place's administrative boundary from GeocodeResult.boundary, or a
          *     hand-drawn area), or origin + destination + corridor_m (a strip between two points, for
-         *     "between A and B" — independent of any actual planned route). To narrow a prior result to only
-         *     the ones with a real boundary meeting some condition (e.g. "just the ones a small road touches
-         *     the edge of"), set min_boundary_count/way_types/boundary_contact — this only ever keeps polygon
-         *     matches, since a point has no boundary to touch.
+         *     "between A and B" — independent of any actual planned route). For a size constraint (e.g. "parks
+         *     over 10 acres" or "parks under a quarter square mile"), set min_area_m2/max_area_m2 — convert
+         *     the person's units to square meters yourself; either or both may be set. To narrow a prior
+         *     result to only the ones with a real boundary meeting some condition (e.g. "just the ones a
+         *     small road touches the edge of"), set min_boundary_count/way_types/boundary_contact — this
+         *     only ever keeps polygon matches, since a point has no boundary to touch.
          */
         AreaSearchRequest: {
             /**
@@ -714,6 +716,11 @@ export interface components {
              * @description Minimum area of the matching feature
              */
             minAreaM2?: number | null;
+            /**
+             * Maxaream2
+             * @description Maximum area of the matching feature
+             */
+            maxAreaM2?: number | null;
             /**
              * Minboundarycount
              * @description Minimum exit_count (see way_types/boundary_contact) of the matching feature

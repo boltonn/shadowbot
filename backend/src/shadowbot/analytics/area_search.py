@@ -54,6 +54,7 @@ async def search_areas(request: AreaSearchRequest, areas: AreaFeatureFinder) -> 
         area
         for area in matches
         if (request.min_area_m2 is None or (area.area_m2 or 0) >= request.min_area_m2)
+        and (request.max_area_m2 is None or (area.area_m2 is not None and area.area_m2 <= request.max_area_m2))
         and (request.min_boundary_count is None or (area.exit_count or 0) >= request.min_boundary_count)
     ]
     qualifying.sort(key=lambda area: area.area_m2 or 0, reverse=True)

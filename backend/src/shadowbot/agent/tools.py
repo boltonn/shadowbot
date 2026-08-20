@@ -193,11 +193,12 @@ async def find_area_features(ctx: RunContext[AgentDeps], request: AreaSearchRequ
     trails/paths, or ['residential', 'service'] for small roads — same OSM tagging convention as
     find_nearby_poi's raw_tags) and request.boundary_contact (crosses/touches/any) to control what
     counts toward request.min_boundary_count (a feature's returned exit_count). Setting
-    min_area_m2/min_boundary_count narrows a result to only its polygon matches (e.g. "just the
-    parks with a small road touching their edge") — a point match never satisfies either, since it
-    has no area or boundary. Results are ranked with polygon matches first (largest area first),
-    then point matches. An empty result means nothing matched — say so rather than relaxing the
-    request's criteria yourself.
+    min_area_m2/max_area_m2/min_boundary_count narrows a result to only its polygon matches (e.g.
+    "just the parks with a small road touching their edge", or "parks under a quarter square
+    mile" — convert the person's units to square meters yourself) — a point match never satisfies
+    any of them, since it has no area or boundary. Results are ranked with polygon matches first
+    (largest area first), then point matches. An empty result means nothing matched — say so
+    rather than relaxing the request's criteria yourself.
     """
     return await compute_area_search(request, areas=ctx.deps.areas)
 
